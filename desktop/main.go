@@ -90,17 +90,8 @@ func appMenu(app *App) *menu.Menu {
 		app.RequestQuitShortcut()
 	})
 
-	editMenu := menu.NewMenu()
-	editMenu.AddText("撤销", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("重做", keys.CmdOrCtrl("shift+z"), func(_ *menu.CallbackData) {})
-	editMenu.AddSeparator()
-	editMenu.AddText("剪切", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("复制", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("粘贴", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("全选", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {})
-
 	return menu.NewMenuFromItems(
 		menu.SubMenu("Lingma Proxy", appMenu),
-		menu.SubMenu("编辑", editMenu),
+		menu.EditMenu(),
 	)
 }

@@ -3,6 +3,7 @@ package remote
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,40 +23,73 @@ func TestNewKeepsPositiveTimeout(t *testing.T) {
 }
 
 func TestExtractBaseURLFromEndpointLog(t *testing.T) {
-	got := extractBaseURLFromText(`2026-04-10 INFO Update endpoint success. endpoint config: https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com`)
-	want := "https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com"
+	got := extractBaseURLFromText(`2026-04-10 INFO Update endpoint success. endpoint config: https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com`)
+	want := "https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
 func TestExtractBaseURLFromMarketplaceLog(t *testing.T) {
-	got := extractBaseURLFromText(`2026-04-30 [info] [Marketplace] Using service url: https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com/marketplace/_apis/public/gallery`)
-	want := "https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com"
+	got := extractBaseURLFromText(`2026-04-30 [info] [Marketplace] Using service url: https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com/marketplace/_apis/public/gallery`)
+	want := "https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
 func TestExtractBaseURLFromRawWindowsLogURL(t *testing.T) {
-	got := extractBaseURLFromText(`2026-05-06T12:00:00 endpoint=https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com/algo/api/v2/model/list`)
-	want := "https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com"
+	got := extractBaseURLFromText(`2026-05-06T12:00:00 endpoint=https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com/algo/api/v2/model/list`)
+	want := "https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestExtractBaseURLIgnoresLingmaOSSAssetHost(t *testing.T) {
+	got := extractBaseURLFromText(`2026-05-06 endpoint config: https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com
+2026-05-06 Download asset from: https://lingma-ide.oss-rg-china-mainland.aliyuncs.com/lingma-extension/download?name=plugin.zip`)
+	want := "https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
 func TestNormalizeBaseURLRepairsMissingLeadingH(t *testing.T) {
-	got := normalizeRemoteBaseURLHint(`ttps://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com`)
-	want := "https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com"
+	got := normalizeRemoteBaseURLHint(`ttps://ai-lingma-example-cn-beijing.rdc.aliyuncs.com`)
+	want := "https://ai-lingma-example-cn-beijing.rdc.aliyuncs.com"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
-func TestNormalizeBaseURLRejectsUnsupportedScheme(t *testing.T) {
-	if got := normalizeRemoteBaseURLHint(`ftp://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com`); got != "" {
+func TestNormalizeBaseURLRejectsLingmaOSSAssetHost(t *testing.T) {
+	if got := normalizeRemoteBaseURLHint(`https://lingma-ide.oss-rg-china-mainland.aliyuncs.com/lingma-extension/download`); got != "" {
 		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestNormalizeBaseURLRejectsUnsupportedScheme(t *testing.T) {
+	if got := normalizeRemoteBaseURLHint(`ftp://ai-lingma-example-cn-beijing.rdc.aliyuncs.com`); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestModelListStatusErrorSuggestsManualRemoteBaseURLOn404(t *testing.T) {
+	client := New(Config{BaseURL: "https://lingma-ide.oss-rg-china-mainland.aliyuncs.com"})
+	err := client.modelListStatusError(404, `<Error><Code>NoSuchKey</Code></Error>`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	text := err.Error()
+	for _, want := range []string{
+		"https://lingma-ide.oss-rg-china-mainland.aliyuncs.com",
+		"远端 API 域名自动探测命中了错误地址",
+		"https://lingma.alibabacloud.com",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("error %q missing %q", text, want)
+		}
 	}
 }
 

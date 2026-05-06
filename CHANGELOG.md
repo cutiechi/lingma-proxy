@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.4.8 - 2026-05-06
+
+- Fixed Remote API base URL auto-detection so Lingma OSS/static asset hosts are rejected and cannot be used as API endpoints.
+- Improved Remote API model-list 404 errors with a clear hint to manually set the official or enterprise remote API domain.
+- Restored desktop input editing shortcuts by using the native Wails edit menu, fixing copy, paste, cut, undo, redo, and select-all in app input fields.
+- Added regression tests for Windows/Lingma log URL parsing, missing leading `h` repair, and OSS-host rejection.
+
 ## v1.4.7 - 2026-05-06
 
 - Renamed user-facing product, desktop app, release assets, and documentation from Lingma IPC Proxy to Lingma Proxy.

@@ -135,7 +135,7 @@ func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("remote model list status %d: %s", resp.StatusCode, truncate(string(body), 500))
+		return nil, c.modelListStatusError(resp.StatusCode, string(body))
 	}
 	var payload struct {
 		Chat   []Model `json:"chat"`
@@ -145,6 +145,14 @@ func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 	return append(payload.Chat, payload.Inline...), nil
+}
+
+func (c *Client) modelListStatusError(statusCode int, body string) error {
+	message := fmt.Sprintf("remote model list status %d from %s: %s", statusCode, c.cfg.BaseURL, truncate(body, 500))
+	if statusCode == http.StatusNotFound || strings.Contains(body, "NoSuchKey") {
+		message += "。这通常表示远端 API 域名自动探测命中了错误地址，请到设置页手动填写 Lingma 官方或企业专属远端 API 域名；官方默认域名为 https://lingma.alibabacloud.com。"
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func (c *Client) Chat(ctx context.Context, request ChatRequest, onDelta func(string)) (*ChatResult, error) {
@@ -592,10 +600,27 @@ func normalizeRemoteBaseURLHint(raw string) string {
 		return ""
 	}
 	host := strings.ToLower(parsed.Host)
-	if !strings.Contains(host, "lingma") && !strings.Contains(host, "rdc.aliyuncs.com") {
+	if !isRemoteAPIHost(host) {
 		return ""
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+
+func isRemoteAPIHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if strings.Contains(host, ".oss-") || strings.Contains(host, "oss-rg-") || strings.Contains(host, ".oss.") {
+		return false
+	}
+	switch host {
+	case "lingma.alibabacloud.com", "lingma-api.tongyi.aliyun.com":
+		return true
+	}
+	if strings.HasSuffix(host, ".rdc.aliyuncs.com") {
+		return true
+	}
+	return false
 }
 
 func estimateTokens(text string) int {

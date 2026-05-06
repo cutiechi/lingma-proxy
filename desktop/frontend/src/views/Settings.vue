@@ -263,7 +263,6 @@ async function save() {
               <dt>登录态有效期</dt>
               <dd :class="{ 'warn-text': detection.remoteTokenExpired }">
                 {{ formattedTokenExpireAt || '未提供' }}
-                <span v-if="formattedTokenExpireAt && detection.remoteTokenExpireAt" class="muted-inline">原始 {{ detection.remoteTokenExpireAt }}</span>
                 <span v-if="detection.remoteTokenExpired">（已过期）</span>
               </dd>
             </div>
