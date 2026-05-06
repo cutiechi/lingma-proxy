@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+## v1.4.7 - 2026-05-06
+
 - Renamed user-facing product, desktop app, release assets, and documentation from Lingma IPC Proxy to Lingma Proxy.
 - Clarified that Remote API mode is the recommended default and that only IPC plugin mode is based on the `coolxll/lingma-ipc-proxy` protocol discovery.
 - Added `lingma-proxy.json` and `~/.config/lingma-proxy/config.json` config lookup/write paths while keeping legacy `lingma-ipc-proxy` config fallback.
 - Added a desktop top-bar force quit button that stops the proxy and exits the app on macOS and Windows.
+- Added Anthropic `/v1/messages/count_tokens` compatibility for Claude Code v2.1.129+.
+- Reduced prompt-emulated tool loops by allowing final answers after tool results and dropping tool calls with missing required arguments.
+- Prevented hosted Anthropic `web_search` from being short-circuited again after a `tool_result` follow-up.
+- Changed the default proxy request timeout to `0`, meaning no proxy-level per-request deadline. Positive timeout values still enable timeout-triggered remote fallback.
 
 ## v1.4.6 - 2026-05-06
 

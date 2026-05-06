@@ -163,12 +163,13 @@ async function save() {
           </div>
           <div class="field">
             <label>超时秒数</label>
-            <input v-model.number="config.Timeout" type="number" min="1" />
+            <input v-model.number="config.Timeout" type="number" min="0" />
+            <small>0 表示不设置代理层单次请求超时，适合长流程任务。</small>
           </div>
           <div class="field span-2 switch-field">
             <div>
               <label>远端超时兜底</label>
-              <p>远端 API 超时、限流或 5xx 且尚未流式输出时，自动切换到下一个可用模型。</p>
+              <p>设置正数超时后，远端 API 超时、限流或 5xx 且尚未流式输出时，自动切换到下一个可用模型。</p>
             </div>
             <label class="switch">
               <input v-model="config.RemoteFallbackEnabled" type="checkbox" />

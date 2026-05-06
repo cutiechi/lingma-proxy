@@ -167,9 +167,6 @@ func New(cfg Config) *Service {
 	if strings.TrimSpace(cfg.ShellType) == "" {
 		cfg.ShellType = lingmaipc.DefaultShellType()
 	}
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 300 * time.Second
-	}
 	if cfg.Transport == "" {
 		cfg.Transport = lingmaipc.TransportAuto
 	}
@@ -223,6 +220,13 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closeClientLocked()
+}
+
+func contextWithOptionalTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 func (s *Service) State() State {
@@ -365,7 +369,7 @@ func (s *Service) generateRemote(
 	client := s.remoteClientLocked()
 	var lastErr error
 	for i, model := range models {
-		attemptCtx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		attemptCtx, cancel := contextWithOptionalTimeout(ctx, s.cfg.Timeout)
 		result, emitted, err := s.generateRemoteWithModel(attemptCtx, client, req, prompt, model, onDelta)
 		cancel()
 		if err == nil {
@@ -513,7 +517,7 @@ func (s *Service) generateLocked(
 	req ChatRequest,
 	onDelta func(string),
 ) (result *ChatResult, err error) {
-	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	requestCtx, cancel := contextWithOptionalTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 
 	ipcClient, err := s.ensureConnected(requestCtx)

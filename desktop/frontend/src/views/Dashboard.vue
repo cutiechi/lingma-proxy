@@ -318,7 +318,7 @@ onUnmounted(() => {
           </div>
           <div class="config-summary-item">
             <label>超时</label>
-            <strong>{{ config.Timeout || 120 }} 秒</strong>
+            <strong>{{ config.Timeout > 0 ? `${config.Timeout} 秒` : '不限制' }}</strong>
           </div>
           <div class="config-summary-item span-2">
             <label>工作目录</label>

@@ -922,7 +922,7 @@ func defaultConfig() service.Config {
 		Model:                 "kmodel",
 		ShellType:             defaultShellType(),
 		SessionMode:           service.SessionModeAuto,
-		Timeout:               300 * time.Second,
+		Timeout:               0,
 		RemoteFallbackEnabled: true,
 		RemoteFallbackModels:  service.DefaultRemoteFallbackModels(),
 	}
@@ -1000,7 +1000,7 @@ func defaultConfig() service.Config {
 					if fileCfg.SessionMode != "" {
 						cfg.SessionMode = service.SessionMode(fileCfg.SessionMode)
 					}
-					if fileCfg.TimeoutSeconds > 0 {
+					if fileCfg.TimeoutSeconds >= 0 {
 						cfg.Timeout = time.Duration(fileCfg.TimeoutSeconds) * time.Second
 					}
 					if fileCfg.RemoteFallbackEnabled != nil {

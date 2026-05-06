@@ -100,7 +100,7 @@ func loadConfig() (service.Config, string) {
 		Model:                 "kmodel",
 		ShellType:             defaultShellType(),
 		SessionMode:           service.SessionModeAuto,
-		Timeout:               300 * time.Second,
+		Timeout:               0,
 		RemoteFallbackEnabled: true,
 		RemoteFallbackModels:  service.DefaultRemoteFallbackModels(),
 	}
@@ -130,7 +130,7 @@ func loadConfig() (service.Config, string) {
 	mode := flag.String("mode", cfg.Mode, "Lingma ACP mode value")
 	model := flag.String("model", cfg.Model, "Default Lingma model when API request omits model")
 	shellType := flag.String("shell-type", cfg.ShellType, "Shell type sent through ACP meta")
-	timeoutSeconds := flag.Int("timeout", int(cfg.Timeout/time.Second), "Per-request timeout in seconds")
+	timeoutSeconds := flag.Int("timeout", int(cfg.Timeout/time.Second), "Per-request timeout in seconds; 0 disables the proxy deadline")
 	remoteFallbackEnabled := flag.Bool("remote-fallback", cfg.RemoteFallbackEnabled, "Enable remote timeout/5xx fallback to the next available model")
 	remoteFallbackModels := flag.String("remote-fallback-models", strings.Join(cfg.RemoteFallbackModels, ","), "Comma-separated remote fallback model IDs")
 	sessionMode := flag.String("session-mode", string(cfg.SessionMode), "Session mode: auto, fresh, reuse")
@@ -243,7 +243,7 @@ func overlayFileConfig(dst *service.Config, src fileConfig) {
 	if strings.TrimSpace(src.SessionMode) != "" {
 		dst.SessionMode = parseSessionMode(src.SessionMode)
 	}
-	if src.TimeoutSeconds > 0 {
+	if src.TimeoutSeconds >= 0 {
 		dst.Timeout = time.Duration(src.TimeoutSeconds) * time.Second
 	}
 	if src.RemoteFallbackEnabled != nil {
@@ -300,7 +300,7 @@ func overlayEnvConfig(dst *service.Config) {
 	if value := strings.TrimSpace(os.Getenv("LINGMA_PROXY_SESSION_MODE")); value != "" {
 		dst.SessionMode = parseSessionMode(value)
 	}
-	if value := envInt("LINGMA_PROXY_TIMEOUT_SECONDS", 0); value > 0 {
+	if value := envInt("LINGMA_PROXY_TIMEOUT_SECONDS", -1); value >= 0 {
 		dst.Timeout = time.Duration(value) * time.Second
 	}
 	if value, ok := envBool("LINGMA_REMOTE_FALLBACK_ENABLED"); ok {

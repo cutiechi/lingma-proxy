@@ -13,7 +13,7 @@ The proxy now supports two backend modes:
 
 ## Current Version
 
-The current desktop line is `v1.4.6`.
+The current desktop line is `v1.4.7`.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
@@ -327,7 +327,7 @@ The proxy only reports models actually exposed by your Lingma plugin. The table 
 
 Default model when the client omits `model`: `kmodel` (`Kimi-K2.6` in the remote model list).
 
-Remote mode enables timeout fallback by default. On timeout, upstream 5xx/429, or network interruption, the proxy only switches models if no streaming bytes have been sent to the client yet. Fallback candidates are filtered against the actual `/v1/models` response, so unavailable models are skipped. Default order:
+Remote mode enables fallback by default. The default proxy request timeout is `0`, which means Lingma Proxy does not set its own per-request deadline and is suitable for long agent workflows. If you set `"timeout"` to a positive number of seconds, timeout errors can also trigger fallback. Upstream 5xx/429 or network interruption can trigger fallback regardless of the timeout setting, but the proxy only switches models if no streaming bytes have been sent to the client yet. Fallback candidates are filtered against the actual `/v1/models` response, so unavailable models are skipped. Default order:
 
 `Kimi-K2.6 -> MiniMax-M2.7 -> Qwen3-Coder -> Qwen3.6-Plus -> Qwen3-Max -> Qwen3-Thinking`
 
@@ -354,7 +354,7 @@ Example:
   "mode": "agent",
   "shell_type": "zsh",
   "session_mode": "auto",
-  "timeout": 300,
+  "timeout": 0,
   "remote_fallback_enabled": true,
   "remote_fallback_models": [
     "kmodel",

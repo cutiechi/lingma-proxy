@@ -16,7 +16,7 @@
 
 ## 当前版本
 
-当前桌面端版本线：`v1.4.6`
+当前桌面端版本线：`v1.4.7`
 
 版本更新记录见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -409,7 +409,7 @@ export ANTHROPIC_API_KEY="any"
 
 当客户端请求没有携带 `model` 字段时，代理默认使用：`kmodel`（远端模型列表里的 Kimi-K2.6）。
 
-远端模式默认开启超时兜底。遇到请求超时、上游 5xx/429 或网络中断时，代理只会在尚未向客户端输出任何流式内容的情况下切换模型。兜底候选会先和实际 `/v1/models` 返回结果求交集，不存在或当前账号不可用的模型会自动跳过。默认顺序：
+远端模式默认开启兜底。代理默认请求超时为 `0`，表示 Lingma Proxy 不设置自己的单次请求 deadline，适合长流程 Agent 任务。如果你把 `"timeout"` 设置为正数秒，超时错误也会触发兜底。上游 5xx/429 或网络中断不受超时设置影响，仍可触发兜底；但代理只会在尚未向客户端输出任何流式内容的情况下切换模型。兜底候选会先和实际 `/v1/models` 返回结果求交集，不存在或当前账号不可用的模型会自动跳过。默认顺序：
 
 `Kimi-K2.6 -> MiniMax-M2.7 -> Qwen3-Coder -> Qwen3.6-Plus -> Qwen3-Max -> Qwen3-Thinking`
 
@@ -436,7 +436,7 @@ export ANTHROPIC_API_KEY="any"
   "mode": "agent",
   "shell_type": "zsh",
   "session_mode": "auto",
-  "timeout": 300,
+  "timeout": 0,
   "remote_fallback_enabled": true,
   "remote_fallback_models": [
     "kmodel",

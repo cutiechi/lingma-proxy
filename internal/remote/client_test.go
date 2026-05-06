@@ -4,7 +4,22 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestNewKeepsZeroTimeoutUnlimited(t *testing.T) {
+	client := New(Config{Timeout: 0})
+	if client.client.Timeout != 0 {
+		t.Fatalf("timeout = %v, want 0", client.client.Timeout)
+	}
+}
+
+func TestNewKeepsPositiveTimeout(t *testing.T) {
+	client := New(Config{Timeout: 7 * time.Second})
+	if client.client.Timeout != 7*time.Second {
+		t.Fatalf("timeout = %v, want 7s", client.client.Timeout)
+	}
+}
 
 func TestExtractBaseURLFromEndpointLog(t *testing.T) {
 	got := extractBaseURLFromText(`2026-04-10 INFO Update endpoint success. endpoint config: https://ai-lingma-cmb01-cn-beijing.rdc.aliyuncs.com`)
