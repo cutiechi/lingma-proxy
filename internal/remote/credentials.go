@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,14 +80,14 @@ func importLingmaCacheCredential() (Credential, error) {
 }
 
 func importLingmaCacheCredentialFromDir(lingmaDir string) (Credential, error) {
-	machineID, err := loadMachineID(lingmaDir)
-	if err != nil {
-		return Credential{}, err
-	}
 	userPath := filepath.Join(lingmaDir, "cache", "user")
 	encrypted, err := os.ReadFile(userPath)
 	if err != nil {
 		return Credential{}, fmt.Errorf("read %s: %w", userPath, err)
+	}
+	machineID, err := loadMachineID(lingmaDir)
+	if err != nil {
+		return Credential{}, err
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(encrypted)))
 	if err != nil {
@@ -148,14 +150,82 @@ func loadMachineID(lingmaDir string) (string, error) {
 			return value, nil
 		}
 	}
-	logBody, err := os.ReadFile(filepath.Join(lingmaDir, "logs", "lingma.log"))
-	if err != nil {
-		return "", fmt.Errorf("remote credential requires cache/id or lingma.log machine id: %w", err)
+
+	for _, path := range candidateMachineIDLogFiles(lingmaDir) {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if value := extractMachineIDFromText(string(body)); value != "" {
+			return value, nil
+		}
 	}
-	markers := []string{"using machine id from file:", "machine id:"}
-	text := string(logBody)
+
+	return "", errors.New("remote credential requires cache/id or Lingma log machine id; checked cache/id, Lingma app logs, and VS Code Lingma plugin logs")
+}
+
+func candidateMachineIDLogFiles(lingmaDir string) []string {
+	paths := []string{
+		filepath.Join(lingmaDir, "logs", "lingma.log"),
+		filepath.Join(lingmaDir, "logs", "Lingma.log"),
+		filepath.Join(lingmaDir, "logs", "main.log"),
+		filepath.Join(lingmaDir, "logs", "renderer.log"),
+		filepath.Join(lingmaDir, "logs", "sharedprocess.log"),
+	}
+	paths = append(paths, recursiveLogFiles(filepath.Join(lingmaDir, "logs"), 24)...)
+
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, root := range lingmaLogRoots(home) {
+			paths = append(paths, recentLingmaAppLogs(root)...)
+			paths = append(paths, recursiveLogFiles(root, 24)...)
+		}
+	}
+	return uniquePathStrings(paths)
+}
+
+func recursiveLogFiles(root string, limit int) []string {
+	type item struct {
+		path    string
+		modTime int64
+	}
+	items := make([]item, 0)
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(entry.Name())
+		if !strings.HasSuffix(name, ".log") && !strings.Contains(name, "lingma") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		items = append(items, item{path: path, modTime: info.ModTime().UnixNano()})
+		return nil
+	})
+	sort.Slice(items, func(i, j int) bool { return items[i].modTime > items[j].modTime })
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.path)
+	}
+	return out
+}
+
+func extractMachineIDFromText(text string) string {
+	markers := []string{
+		"using machine id from file:",
+		"machine id:",
+		"machine_id:",
+		"machineId:",
+		"machine-id:",
+	}
+	lowerText := strings.ToLower(text)
 	for _, marker := range markers {
-		index := strings.LastIndex(strings.ToLower(text), marker)
+		index := strings.LastIndex(lowerText, strings.ToLower(marker))
 		if index < 0 {
 			continue
 		}
@@ -163,11 +233,34 @@ func loadMachineID(lingmaDir string) (string, error) {
 		if newline := strings.IndexByte(line, '\n'); newline >= 0 {
 			line = line[:newline]
 		}
-		if value := strings.TrimSpace(line); value != "" {
-			return value, nil
+		if value := normalizeMachineID(line); value != "" {
+			return value
 		}
 	}
-	return "", errors.New("machine id not found in Lingma cache")
+
+	re := regexp.MustCompile(`(?i)"?(machine[_-]?id|machineId)"?\s*[:=]\s*"?([A-Za-z0-9._:-]{16,})"?`)
+	matches := re.FindAllStringSubmatch(text, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if len(matches[i]) >= 3 {
+			if value := normalizeMachineID(matches[i][2]); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeMachineID(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, ` "'<>),]}`)
+	if idx := strings.IndexAny(value, " \t\r\n,;"); idx >= 0 {
+		value = value[:idx]
+	}
+	value = strings.Trim(value, ` "'<>),]}`)
+	if len(value) < aes.BlockSize {
+		return ""
+	}
+	return value
 }
 
 func decryptCacheUser(machineID string, ciphertext []byte) ([]byte, error) {

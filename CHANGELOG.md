@@ -4,6 +4,13 @@
 
 - Nothing yet.
 
+## v1.4.5 - 2026-05-06
+
+- Improved Windows remote credential detection for Lingma App installations.
+- Remote API mode now checks `cache/user` before machine-id lookup so missing-login errors are more accurate.
+- Expanded machine-id discovery to recursive Lingma app logs and VS Code Lingma plugin logs instead of only `logs/lingma.log`.
+- Added support for additional machine-id log formats such as `machine_id`, `machineId`, and JSON-style fields.
+
 ## v1.4.4 - 2026-05-05
 
 - Enabled real SSE streaming for OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` requests that include tools.

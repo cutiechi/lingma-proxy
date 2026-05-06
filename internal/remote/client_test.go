@@ -17,3 +17,17 @@ func TestExtractBaseURLFromMarketplaceLog(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+func TestExtractMachineIDFromTextMarkers(t *testing.T) {
+	got := extractMachineIDFromText(`2026-05-06 info using machine id from file: abcdef1234567890abcdef`)
+	if got != "abcdef1234567890abcdef" {
+		t.Fatalf("machine id = %q", got)
+	}
+}
+
+func TestExtractMachineIDFromTextJSON(t *testing.T) {
+	got := extractMachineIDFromText(`{"machineId":"windows-machine-id-1234567890","other":true}`)
+	if got != "windows-machine-id-1234567890" {
+		t.Fatalf("machine id = %q", got)
+	}
+}
