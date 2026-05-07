@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.4.9 - 2026-05-07
+
+- Added Remote-mode image routing: image requests now use the proven Lingma IPC image pipeline instead of sending local/data URLs directly to the remote chat endpoint.
+- Added mixed image + tool handling: the proxy extracts image context through IPC, then returns to Remote API native tool calling so clients still receive proper `tool_calls` / `tool_use`.
+- Fixed multi-turn image follow-ups by reusing the most recent user image from request history when the latest user turn says things like "continue based on the previous image".
+- Improved Remote API tool compatibility by forwarding structured messages, tool definitions, tool choice, and native remote tool-call deltas instead of prompt-emulating tools in Remote mode.
+- Added regression tests for remote structured tools, image routing, image-context injection, and previous-turn image reuse.
+- Verified the production desktop app launch path from `/Applications/Lingma Proxy.app`, including pure image, multi-turn image, and image + forced tool-call requests.
+
 ## v1.4.8 - 2026-05-06
 
 - Fixed Remote API base URL auto-detection so Lingma OSS/static asset hosts are rejected and cannot be used as API endpoints.

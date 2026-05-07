@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lingma-ipc-proxy/internal/toolemulation"
 )
 
 const (
@@ -55,8 +57,27 @@ type Model struct {
 type ChatRequest struct {
 	Model       string
 	Prompt      string
+	Messages    []Message
+	Images      []Image
 	Stream      bool
 	Temperature *float64
+	Tools       []toolemulation.ToolDef
+	ToolChoice  toolemulation.ToolChoice
+}
+
+type Image struct {
+	MediaType string
+	Data      string
+	URL       string
+}
+
+type Message struct {
+	Role       string
+	Content    string
+	Images     []Image
+	Name       string
+	ToolCallID string
+	ToolCalls  []toolemulation.ToolCall
 }
 
 type ChatResult struct {
@@ -65,6 +86,7 @@ type ChatResult struct {
 	OutputTokens  int
 	RequestID     string
 	CredentialSrc string
+	ToolCalls     []toolemulation.ToolCall
 }
 
 type StreamEvent struct {
@@ -186,9 +208,13 @@ func (c *Client) Chat(ctx context.Context, request ChatRequest, onDelta func(str
 		return nil, fmt.Errorf("remote chat status %d: %s", resp.StatusCode, truncate(string(respBody), 1000))
 	}
 	var builder strings.Builder
+	toolCallBuffer := newRemoteToolCallBuffer()
 	if err := scanSSE(resp.Body, func(event sseEvent) error {
 		if event.Done {
 			return nil
+		}
+		if len(event.ToolCalls) > 0 {
+			toolCallBuffer.Add(event.ToolCalls)
 		}
 		if event.Content == "" {
 			return nil
@@ -208,6 +234,7 @@ func (c *Client) Chat(ctx context.Context, request ChatRequest, onDelta func(str
 		OutputTokens:  estimateTokens(text),
 		RequestID:     requestID,
 		CredentialSrc: cred.Source,
+		ToolCalls:     toolCallBuffer.Calls(),
 	}, nil
 }
 
@@ -220,12 +247,13 @@ func (c *Client) buildBody(requestID string, request ChatRequest) (string, error
 	if strings.EqualFold(model, "auto") {
 		model = ""
 	}
+	imageURLs := projectImages(request.Images)
 	payload := map[string]any{
 		"request_id":       requestID,
 		"request_set_id":   "",
 		"chat_record_id":   requestID,
 		"stream":           true,
-		"image_urls":       nil,
+		"image_urls":       nullableSlice(imageURLs),
 		"is_reply":         false,
 		"is_retry":         false,
 		"session_id":       "",
@@ -242,26 +270,14 @@ func (c *Client) buildBody(requestID string, request ChatRequest) (string, error
 			"display_name": "",
 			"model":        model,
 			"format":       "",
-			"is_vl":        false,
+			"is_vl":        len(imageURLs) > 0,
 			"is_reasoning": false,
 			"api_key":      "",
 			"url":          "",
 			"source":       "",
 			"enable":       false,
 		},
-		"messages": []map[string]any{{
-			"role":    "user",
-			"content": request.Prompt,
-			"response_meta": map[string]any{
-				"id": "",
-				"usage": map[string]int{
-					"prompt_tokens":     0,
-					"completion_tokens": 0,
-					"total_tokens":      0,
-				},
-			},
-			"reasoning_content_signature": "",
-		}},
+		"messages": projectMessages(request),
 		"business": map[string]any{
 			"product":  "jb_plugin",
 			"version":  c.cfg.CosyVersion,
@@ -272,8 +288,191 @@ func (c *Client) buildBody(requestID string, request ChatRequest) (string, error
 			"name":     "memory_intent_recognition_" + requestID,
 		},
 	}
+	if tools := projectTools(request.Tools); len(tools) > 0 {
+		payload["tools"] = tools
+	}
+	if choice := projectToolChoice(request.ToolChoice); choice != nil {
+		payload["tool_choice"] = choice
+	}
 	body, err := json.Marshal(payload)
 	return string(body), err
+}
+
+func nullableSlice[T any](items []T) any {
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+func projectImages(images []Image) []string {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(images))
+	for _, img := range images {
+		item := projectImage(img)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func projectImage(img Image) string {
+	if strings.TrimSpace(img.Data) == "" && strings.TrimSpace(img.URL) == "" {
+		return ""
+	}
+	mediaType := strings.TrimSpace(img.MediaType)
+	if mediaType == "" {
+		mediaType = "image/jpeg"
+	}
+	if strings.TrimSpace(img.Data) != "" {
+		return "data:" + mediaType + ";base64," + strings.TrimSpace(img.Data)
+	}
+	return strings.TrimSpace(img.URL)
+}
+
+func projectMessages(request ChatRequest) []map[string]any {
+	source := request.Messages
+	if len(source) == 0 {
+		source = []Message{{Role: "user", Content: request.Prompt}}
+	}
+	out := make([]map[string]any, 0, len(source))
+	for _, message := range source {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			continue
+		}
+		item := map[string]any{
+			"role":    role,
+			"content": projectMessageContent(message),
+			"response_meta": map[string]any{
+				"id": "",
+				"usage": map[string]int{
+					"prompt_tokens":     0,
+					"completion_tokens": 0,
+					"total_tokens":      0,
+				},
+			},
+			"reasoning_content_signature": "",
+		}
+		if message.Name != "" {
+			item["name"] = message.Name
+		}
+		if message.ToolCallID != "" {
+			item["tool_call_id"] = message.ToolCallID
+		}
+		if calls := projectMessageToolCalls(message.ToolCalls); len(calls) > 0 {
+			item["tool_calls"] = calls
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return []map[string]any{{"role": "user", "content": request.Prompt}}
+	}
+	return out
+}
+
+func projectMessageContent(message Message) any {
+	if len(message.Images) == 0 {
+		return message.Content
+	}
+	content := make([]map[string]any, 0, len(message.Images)+1)
+	if strings.TrimSpace(message.Content) != "" {
+		content = append(content, map[string]any{
+			"type": "text",
+			"text": message.Content,
+		})
+	}
+	for _, img := range message.Images {
+		imageURL := projectImage(img)
+		if imageURL == "" {
+			continue
+		}
+		content = append(content, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": imageURL,
+			},
+		})
+	}
+	if len(content) == 0 {
+		return message.Content
+	}
+	return content
+}
+
+func projectMessageToolCalls(calls []toolemulation.ToolCall) []map[string]any {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(calls))
+	for i, call := range calls {
+		name := strings.TrimSpace(call.Name)
+		if name == "" {
+			continue
+		}
+		args, _ := json.Marshal(call.Arguments)
+		out = append(out, map[string]any{
+			"index": i,
+			"id":    strings.TrimSpace(call.ID),
+			"type":  "function",
+			"function": map[string]any{
+				"name":      name,
+				"arguments": string(args),
+			},
+		})
+	}
+	return out
+}
+
+func projectTools(tools []toolemulation.ToolDef) []map[string]any {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		params := any(tool.InputSchema)
+		if len(tool.InputSchema) == 0 {
+			params = map[string]any{"type": "object", "properties": map[string]any{}}
+		}
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        name,
+				"description": strings.TrimSpace(tool.Description),
+				"parameters":  params,
+			},
+		})
+	}
+	return out
+}
+
+func projectToolChoice(choice toolemulation.ToolChoice) any {
+	switch choice.Mode {
+	case "none":
+		return "none"
+	case "any":
+		return "required"
+	case "tool":
+		name := strings.TrimSpace(choice.Name)
+		if name == "" {
+			return nil
+		}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": name,
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 func (c *Client) headers(cred Credential, path string, body string) (map[string]string, error) {
@@ -334,14 +533,34 @@ type outerSSE struct {
 type innerSSE struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string                `json:"content"`
+			ToolCalls []remoteToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
 }
 
 type sseEvent struct {
-	Content string
-	Done    bool
+	Content   string
+	ToolCalls []remoteToolCallFragment
+	Done      bool
+}
+
+type remoteToolCallFragment struct {
+	Index             int
+	ID                string
+	Type              string
+	Name              string
+	ArgumentsFragment string
+}
+
+type remoteToolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function,omitempty"`
 }
 
 func scanSSE(reader io.Reader, onEvent func(sseEvent) error) error {
@@ -389,10 +608,94 @@ func parseSSEPayload(payload string) (sseEvent, bool, error) {
 		return sseEvent{}, false, err
 	}
 	var builder strings.Builder
+	var toolCalls []remoteToolCallFragment
 	for _, choice := range inner.Choices {
 		builder.WriteString(choice.Delta.Content)
+		for _, tc := range choice.Delta.ToolCalls {
+			toolCalls = append(toolCalls, remoteToolCallFragment{
+				Index:             tc.Index,
+				ID:                strings.TrimSpace(tc.ID),
+				Type:              strings.TrimSpace(tc.Type),
+				Name:              strings.TrimSpace(tc.Function.Name),
+				ArgumentsFragment: tc.Function.Arguments,
+			})
+		}
 	}
-	return sseEvent{Content: builder.String()}, true, nil
+	return sseEvent{Content: builder.String(), ToolCalls: toolCalls}, true, nil
+}
+
+type remoteToolCallBuffer struct {
+	order  []int
+	states map[int]*remoteToolCallState
+}
+
+type remoteToolCallState struct {
+	id        string
+	callType  string
+	name      string
+	arguments strings.Builder
+}
+
+func newRemoteToolCallBuffer() *remoteToolCallBuffer {
+	return &remoteToolCallBuffer{states: map[int]*remoteToolCallState{}}
+}
+
+func (b *remoteToolCallBuffer) Add(fragments []remoteToolCallFragment) {
+	if b == nil {
+		return
+	}
+	for _, fragment := range fragments {
+		state := b.states[fragment.Index]
+		if state == nil {
+			state = &remoteToolCallState{}
+			b.states[fragment.Index] = state
+			b.order = append(b.order, fragment.Index)
+		}
+		if fragment.ID != "" {
+			state.id = fragment.ID
+		}
+		if fragment.Type != "" {
+			state.callType = fragment.Type
+		}
+		if fragment.Name != "" {
+			state.name = fragment.Name
+		}
+		if fragment.ArgumentsFragment != "" {
+			state.arguments.WriteString(fragment.ArgumentsFragment)
+		}
+	}
+}
+
+func (b *remoteToolCallBuffer) Calls() []toolemulation.ToolCall {
+	if b == nil || len(b.order) == 0 {
+		return nil
+	}
+	out := make([]toolemulation.ToolCall, 0, len(b.order))
+	for _, index := range b.order {
+		state := b.states[index]
+		if state == nil || strings.TrimSpace(state.name) == "" {
+			continue
+		}
+		args := strings.TrimSpace(state.arguments.String())
+		call := toolemulation.ToolCall{
+			ID:        strings.TrimSpace(state.id),
+			Name:      strings.TrimSpace(state.name),
+			Arguments: map[string]any{},
+		}
+		if args != "" {
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(args), &parsed); err == nil {
+				call.Arguments = parsed
+			} else {
+				call.Arguments = map[string]any{"raw_arguments": args}
+			}
+		}
+		if call.ID == "" {
+			call.ID = fmt.Sprintf("toolu_%d_%d", time.Now().UnixNano(), index)
+		}
+		out = append(out, call)
+	}
+	return out
 }
 
 func candidateConfigFiles() []string {

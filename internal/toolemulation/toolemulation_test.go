@@ -86,6 +86,8 @@ func TestInjectToolingIncludesAutoToolGuidance(t *testing.T) {
 		"Core tool syntax examples",
 		"conceptual question",
 		"NEVER ask the user to run a command",
+		"Emit at most 5 independent tool actions",
+		"exclude node_modules",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -174,5 +176,40 @@ func TestParseActionBlocksDropsCallsMissingRequiredArgs(t *testing.T) {
 	}
 	if !strings.Contains(clean, "\"path\"") {
 		t.Fatalf("clean should preserve unparseable action block, got %q", clean)
+	}
+}
+
+func TestParseActionBlocksDeduplicatesAndLimitsCalls(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		command := "pwd"
+		if i%2 == 1 {
+			command = "ls " + string(rune('a'+i))
+		}
+		b.WriteString("```json action\n")
+		b.WriteString(`{"tool":"Bash","parameters":{"command":"` + command + `"}}`)
+		b.WriteString("\n```\n")
+	}
+
+	calls, clean, err := ParseActionBlocks(b.String(), []ToolDef{{
+		Name: "Bash",
+		InputSchema: map[string]any{
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string"},
+			},
+			"required": []any{"command"},
+		},
+	}}, Config{MaxToolCalls: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean != "" {
+		t.Fatalf("clean = %q", clean)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("call count = %d, calls = %+v", len(calls), calls)
+	}
+	if calls[0].Arguments["command"] != "pwd" {
+		t.Fatalf("first command = %+v", calls[0].Arguments)
 	}
 }

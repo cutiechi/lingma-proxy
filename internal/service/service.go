@@ -62,9 +62,11 @@ type Image struct {
 }
 
 type ChatMessage struct {
-	Role   string
-	Text   string
-	Images []Image
+	Role       string
+	Text       string
+	Images     []Image
+	ToolCallID string
+	ToolCalls  []toolemulation.ToolCall
 }
 
 type ChatRequest struct {
@@ -353,11 +355,17 @@ func (s *Service) generateRemote(
 	req ChatRequest,
 	onDelta func(string),
 ) (*ChatResult, error) {
+	if requestHasImages(req) {
+		if len(req.Tools) > 0 && req.ToolChoice.Mode != "none" {
+			return s.generateRemoteWithImageContext(ctx, req, onDelta)
+		}
+		return s.generateWithReconnect(ctx, req, onDelta)
+	}
 	if strings.TrimSpace(req.Model) == "" {
 		req.Model = s.DefaultModel()
 	}
 	req.Model = normalizeModelForBackend(BackendRemote, req.Model)
-	prompt, err := buildLingmaPrompt(req, SessionModeFresh)
+	prompt, err := buildLingmaPrompt(req, SessionModeFresh, false)
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +391,23 @@ func (s *Service) generateRemote(
 	return nil, lastErr
 }
 
+func (s *Service) generateRemoteWithImageContext(
+	ctx context.Context,
+	req ChatRequest,
+	onDelta func(string),
+) (*ChatResult, error) {
+	imageReq := req
+	imageReq.Tools = nil
+	imageReq.ToolChoice = toolemulation.ToolChoice{Mode: "none"}
+	imageReq.ParallelToolCalls = nil
+	imageResult, err := s.generateWithReconnect(ctx, imageReq, nil)
+	if err != nil {
+		return nil, fmt.Errorf("image context extraction through IPC failed: %w", err)
+	}
+	remoteReq := requestWithImageContext(req, imageResult.Text)
+	return s.generateRemote(ctx, remoteReq, onDelta)
+}
+
 func (s *Service) generateRemoteWithModel(
 	ctx context.Context,
 	client *remote.Client,
@@ -403,11 +428,31 @@ func (s *Service) generateRemoteWithModel(
 	remoteResult, err := client.Chat(ctx, remote.ChatRequest{
 		Model:       model,
 		Prompt:      prompt,
+		Messages:    remoteMessagesFromRequest(req),
+		Images:      remoteImagesFromRequest(req),
 		Stream:      onDelta != nil,
 		Temperature: req.Temperature,
+		Tools:       req.Tools,
+		ToolChoice:  req.ToolChoice,
 	}, delta)
 	if err != nil {
 		return nil, emitted, err
+	}
+	if len(remoteResult.ToolCalls) == 0 && shouldRetryRemoteNativeTool(req, remoteResult.Text) {
+		retryResult, retryErr := client.Chat(ctx, remote.ChatRequest{
+			Model:       model,
+			Prompt:      prompt,
+			Messages:    remoteMessagesFromRequest(req),
+			Images:      remoteImagesFromRequest(req),
+			Stream:      false,
+			Temperature: req.Temperature,
+			Tools:       req.Tools,
+			ToolChoice:  toolemulation.ToolChoice{Mode: "any"},
+		}, nil)
+		if retryErr == nil && len(retryResult.ToolCalls) > 0 {
+			remoteResult = retryResult
+			emitted = false
+		}
 	}
 
 	result := &ChatResult{
@@ -422,23 +467,131 @@ func (s *Service) generateRemoteWithModel(
 		Endpoint:         remote.ResolveBaseURL(s.cfg.RemoteBaseURL),
 		Transport:        "remote",
 		EffectiveSession: SessionModeFresh,
+		ToolCalls:        remoteResult.ToolCalls,
 	}
-	s.applyToolEmulation(ctx, req, prompt, result, onDelta, func(hintPrompt string) (string, int, error) {
-		retryResult, retryErr := client.Chat(ctx, remote.ChatRequest{
-			Model:       model,
-			Prompt:      hintPrompt,
-			Stream:      onDelta != nil,
-			Temperature: req.Temperature,
-		}, onDelta)
-		if retryErr != nil {
-			return "", 0, retryErr
-		}
-		if retryResult == nil {
-			return "", 0, nil
-		}
-		return retryResult.Text, retryResult.OutputTokens, nil
-	})
 	return result, emitted, nil
+}
+
+func remoteMessagesFromRequest(req ChatRequest) []remote.Message {
+	out := make([]remote.Message, 0, len(req.Messages)+1)
+	if system := strings.TrimSpace(req.System); system != "" {
+		out = append(out, remote.Message{Role: "system", Content: system})
+	}
+	for _, message := range req.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role == "" {
+			continue
+		}
+		content := strings.TrimSpace(message.Text)
+		if content == "" && len(message.Images) == 0 && len(message.ToolCalls) == 0 {
+			continue
+		}
+		out = append(out, remote.Message{
+			Role:       role,
+			Content:    content,
+			Images:     remoteImagesFromChatMessage(message),
+			ToolCallID: strings.TrimSpace(message.ToolCallID),
+			ToolCalls:  message.ToolCalls,
+		})
+	}
+	return out
+}
+
+func remoteImagesFromChatMessage(message ChatMessage) []remote.Image {
+	if len(message.Images) == 0 {
+		return nil
+	}
+	images := make([]remote.Image, 0, len(message.Images))
+	for _, img := range message.Images {
+		if strings.TrimSpace(img.Data) == "" && strings.TrimSpace(img.URL) == "" {
+			continue
+		}
+		images = append(images, remote.Image{
+			MediaType: strings.TrimSpace(img.MediaType),
+			Data:      img.Data,
+			URL:       strings.TrimSpace(img.URL),
+		})
+	}
+	return images
+}
+
+func remoteImagesFromRequest(req ChatRequest) []remote.Image {
+	var images []remote.Image
+	for _, message := range req.Messages {
+		for _, img := range message.Images {
+			if strings.TrimSpace(img.Data) == "" && strings.TrimSpace(img.URL) == "" {
+				continue
+			}
+			images = append(images, remote.Image{
+				MediaType: strings.TrimSpace(img.MediaType),
+				Data:      img.Data,
+				URL:       strings.TrimSpace(img.URL),
+			})
+		}
+	}
+	return images
+}
+
+func requestHasImages(req ChatRequest) bool {
+	for _, message := range req.Messages {
+		if len(remoteImagesFromChatMessage(message)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func requestWithImageContext(req ChatRequest, imageContext string) ChatRequest {
+	out := req
+	out.Messages = make([]ChatMessage, len(req.Messages))
+	copy(out.Messages, req.Messages)
+	for i := range out.Messages {
+		out.Messages[i].Images = nil
+	}
+	contextText := strings.TrimSpace(imageContext)
+	if contextText == "" {
+		return out
+	}
+	addition := "\n\n[图片上下文]\n" + contextText
+	for i := len(out.Messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(out.Messages[i].Role), "user") {
+			out.Messages[i].Text = strings.TrimSpace(out.Messages[i].Text + addition)
+			return out
+		}
+	}
+	out.Messages = append(out.Messages, ChatMessage{Role: "user", Text: strings.TrimSpace("[图片上下文]\n" + contextText)})
+	return out
+}
+
+func shouldRetryRemoteNativeTool(req ChatRequest, text string) bool {
+	if len(req.Tools) == 0 || req.ToolChoice.Mode == "none" {
+		return false
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || len([]rune(trimmed)) > 180 {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	cues := []string{
+		"让我", "我来", "我将", "接下来", "继续", "查看", "检查", "搜索", "读取", "运行", "执行",
+		"let me", "i'll", "i will", "next", "continue", "check", "inspect", "search", "read", "run",
+	}
+	hasCue := false
+	for _, cue := range cues {
+		if strings.Contains(lower, cue) {
+			hasCue = true
+			break
+		}
+	}
+	if !hasCue {
+		return false
+	}
+	return strings.HasSuffix(trimmed, ":") ||
+		strings.HasSuffix(trimmed, "：") ||
+		strings.Contains(trimmed, "：\n") ||
+		strings.Contains(lower, "use ") ||
+		strings.Contains(lower, "call ") ||
+		strings.Contains(trimmed, "工具")
 }
 
 func (s *Service) remoteAttemptModels(ctx context.Context, primary string) []string {
@@ -526,7 +679,7 @@ func (s *Service) generateLocked(
 	}
 
 	effectiveMode := resolveSessionMode(req, s.cfg.SessionMode)
-	prompt, err := buildLingmaPrompt(req, effectiveMode)
+	prompt, err := buildLingmaPrompt(req, effectiveMode, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1078,14 +1231,14 @@ func resolveSessionMode(req ChatRequest, configured SessionMode) SessionMode {
 
 func extractLastUserImages(messages []ChatMessage) []Image {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
+		if messages[i].Role == "user" && len(messages[i].Images) > 0 {
 			return messages[i].Images
 		}
 	}
 	return nil
 }
 
-func buildLingmaPrompt(req ChatRequest, mode SessionMode) (string, error) {
+func buildLingmaPrompt(req ChatRequest, mode SessionMode, emulateTools bool) (string, error) {
 	messages := filteredMessages(req.Messages)
 	var lastUser string
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -1102,7 +1255,7 @@ func buildLingmaPrompt(req ChatRequest, mode SessionMode) (string, error) {
 	}
 
 	system := strings.TrimSpace(req.System)
-	if len(req.Tools) > 0 && req.ToolChoice.Mode != "none" {
+	if emulateTools && len(req.Tools) > 0 && req.ToolChoice.Mode != "none" {
 		system = toolemulation.InjectTooling(system, req.Tools, req.ToolChoice, req.ParallelToolCalls)
 	}
 
@@ -1110,7 +1263,7 @@ func buildLingmaPrompt(req ChatRequest, mode SessionMode) (string, error) {
 		return lastUser, nil
 	}
 
-	if len(req.Tools) > 0 {
+	if emulateTools && len(req.Tools) > 0 {
 		parts := make([]string, 0, len(messages)+3)
 		for _, message := range messages {
 			role := "User"
@@ -1151,6 +1304,10 @@ func filteredMessages(messages []ChatMessage) []ChatMessage {
 		text := strings.TrimSpace(message.Text)
 		if text == "" {
 			continue
+		}
+		if role == "tool" {
+			text = toolemulation.ActionOutputPrompt(message.ToolCallID, text)
+			role = "user"
 		}
 		if role != "user" && role != "assistant" {
 			continue

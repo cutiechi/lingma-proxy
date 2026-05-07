@@ -13,7 +13,7 @@ The proxy now supports two backend modes:
 
 ## Current Version
 
-The current desktop line is `v1.4.8`.
+The current desktop line is `v1.4.9`.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
@@ -90,6 +90,7 @@ Compared with the original protocol proof of concept, this repository focuses on
 - **Anthropic streaming tool-call hardening** so streaming clients such as Claude Code receive final `tool_use` events instead of premature refusal text when tools are present.
 - **Image input** for OpenAI `image_url` and Anthropic image blocks.
 - **Local and remote image normalization** for data URLs, HTTP URLs, `file://` URLs, and absolute local paths, with automatic JPEG downscaling for large images.
+- **Remote-mode image fallback** so image requests use the proven Lingma IPC image pipeline; image + tool requests extract image context through IPC and then return to Remote API native tool calling.
 - **Request log image redaction** so large base64 payloads are visible as image markers instead of breaking the desktop log view.
 - **More request parameter compatibility** so stricter clients can connect without custom patches.
 - **Full request and response recording** in the desktop app for debugging 400/500 errors.
@@ -130,9 +131,12 @@ flowchart LR
   Service --> Session["Session Manager"]
   Service --> Tools["Tool Emulation"]
   Service --> Models["Model Discovery"]
+  Service --> Images["Image Router"]
   Service --> Backend{"Backend Mode"}
   Backend --> Transport["IPC Plugin Transport"]
   Backend --> Remote["Remote API Client"]
+  Images -->|"image requests"| Transport
+  Images -->|"image + tools: extract context"| Remote
   Transport --> Pipe["Windows Named Pipe"]
   Transport --> WS["macOS / Windows WebSocket"]
   Pipe --> Lingma["Tongyi Lingma IDE Plugin"]
@@ -221,6 +225,7 @@ Notes:
 - If your Lingma plugin uses a dedicated domain, remote mode first uses `--remote-base-url`, `LINGMA_REMOTE_BASE_URL`, or the JSON config field. If those are empty, it scans Lingma's local logs on macOS, Windows, and Linux for endpoint hints such as `endpoint config:` and marketplace service URLs.
 - The desktop Settings page shows the resolved remote domain and detection source without exposing tokens.
 - `/v1/models` in remote mode returns remote API model keys, which may not match the IPC plugin display IDs such as `MiniMax-M2.7` or `Kimi-K2.6`.
+- Image requests in remote mode are routed through the IPC image pipeline because the direct remote chat endpoint ignores local `file://` and data URL image payloads. If a request also contains tools, Lingma Proxy first extracts image context through IPC and then sends the tool-capable turn through Remote API native tool calling.
 - Local validation passed `/health`, `/v1/models`, OpenAI streaming/non-streaming chat, and Claude Code Anthropic + Bash tool use. Claude Code full tool runs are much slower than simple OpenAI requests because the client sends a large context and performs a second tool-result turn.
 - This mode is inspired by the remote API and credential-signing research in [ZipperCode/lingma2api](https://github.com/ZipperCode/lingma2api), integrated here as a switchable backend under the existing OpenAI / Anthropic / desktop app architecture.
 

@@ -16,7 +16,7 @@
 
 ## 当前版本
 
-当前桌面端版本线：`v1.4.8`
+当前桌面端版本线：`v1.4.9`
 
 版本更新记录见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -53,6 +53,7 @@ GitHub Actions 会在 Release 中产出：
 | Function Calling / Tools | 支持，使用工具调用模拟实现 |
 | 多轮 Agent 工具循环 | 支持 |
 | 图片输入 | 支持 base64、data URL、HTTP URL |
+| 远端模式图片兜底 | 有图请求使用 IPC 图片链路；图片 + 工具请求先提取图片上下文，再回到 Remote API 原生工具调用 |
 | 请求 / 响应完整日志 | 桌面端支持完整查看和复制 |
 | 后端模式切换 | 支持 IPC 插件模式 / 远端 API 模式 |
 | macOS WebSocket 自动探测 | 支持 |
@@ -178,9 +179,12 @@ flowchart LR
   Service --> Tooling["工具调用模拟"]
   Service --> Model["模型探测"]
   Service --> Recorder["请求 / 日志记录"]
+  Service --> Images["图片路由"]
   Service --> Backend{"后端模式"}
   Backend --> Transport["IPC 插件传输层"]
   Backend --> Remote["远端 API 客户端"]
+  Images -->|"有图请求"| Transport
+  Images -->|"图片 + 工具：提取图片上下文"| Remote
   Transport --> Pipe["Windows Named Pipe"]
   Transport --> WS["WebSocket"]
   Pipe --> Lingma["通义灵码 IDE 插件"]
@@ -287,6 +291,7 @@ lingma-proxy \
 - 如果 Lingma 插件配置过专属域名，远端模式会优先使用 `--remote-base-url`、`LINGMA_REMOTE_BASE_URL` 或配置文件；这些为空时，会扫描 macOS、Windows、Linux 上 Lingma 本地日志里的 `endpoint config:`、Marketplace service URL 等线索。
 - 桌面端设置页会展示当前解析到的远端域名和来源，但不会展示 token / key 明文。
 - 远端模式的 `/v1/models` 返回的是远端接口模型 key，不一定等同于 IPC 插件模式里看到的 `MiniMax-M2.7`、`Kimi-K2.6` 等展示名。
+- 远端模式下的图片请求会自动走 IPC 图片链路，因为直连远端聊天接口不会直接消费本地 `file://` 和 data URL 图片。若请求同时带工具，代理会先通过 IPC 提取图片上下文，再把不含图片但包含上下文的请求交给 Remote API 原生工具调用。
 - 当前本机实测：`/health`、`/v1/models`、OpenAI 流式 / 非流式、Claude Code Anthropic + Bash 工具调用均可用；Claude Code 完整工具链耗时明显高于简单 OpenAI 请求。
 - 该模式参考了 [ZipperCode/lingma2api](https://github.com/ZipperCode/lingma2api) 对 Lingma 远端接口、签名和登录态结构的探索，本仓库将其作为可切换后端集成到现有 OpenAI / Anthropic / 桌面 App 架构中。
 

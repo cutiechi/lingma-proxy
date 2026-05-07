@@ -1208,7 +1208,7 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, r *http.Request, req 
 }
 
 func shouldAggregateToolStream(req service.ChatRequest) bool {
-	return len(req.Tools) > 0 && truthyEnv("LINGMA_AGGREGATE_TOOL_STREAM")
+	return len(req.Tools) > 0
 }
 
 type toolStreamFilter struct {
@@ -1450,20 +1450,18 @@ func normalizeAnthropicRequest(req anthropicRequest) (service.ChatRequest, error
 		case "user":
 			text, toolResults := extractAnthropicUserContent(message.Content)
 			images := extractAnthropicImages(message.Content)
-			for _, tr := range toolResults {
-				prompt := toolemulation.ActionOutputPrompt(tr.ToolUseID, tr.Content)
-				if prompt != "" {
-					messages = append(messages, service.ChatMessage{Role: "user", Text: prompt})
-				}
-			}
 			if text != "" || len(images) > 0 {
 				messages = append(messages, service.ChatMessage{Role: role, Text: text, Images: images})
 			}
+			for _, tr := range toolResults {
+				if strings.TrimSpace(tr.Content) != "" {
+					messages = append(messages, service.ChatMessage{Role: "tool", Text: tr.Content, ToolCallID: tr.ToolUseID})
+				}
+			}
 		case "assistant":
 			text, calls := extractAnthropicAssistantContent(message.Content)
-			projected := toolemulation.AssistantToolCallsToText(text, calls)
-			if projected != "" {
-				messages = append(messages, service.ChatMessage{Role: role, Text: projected})
+			if text != "" || len(calls) > 0 {
+				messages = append(messages, service.ChatMessage{Role: role, Text: text, ToolCalls: calls})
 			}
 		}
 	}
@@ -1510,19 +1508,15 @@ func normalizeOpenAIRequest(req openAIChatRequest) (service.ChatRequest, error) 
 		case "assistant":
 			text := strings.TrimSpace(extractText(message.Content))
 			calls := extractOpenAIToolCalls(message.ToolCalls)
-			projected := toolemulation.AssistantToolCallsToText(text, calls)
-			if projected != "" {
-				messages = append(messages, service.ChatMessage{Role: role, Text: projected})
+			if text != "" || len(calls) > 0 {
+				messages = append(messages, service.ChatMessage{Role: role, Text: text, ToolCalls: calls})
 			}
 		case "tool":
 			output := strings.TrimSpace(extractText(message.Content))
 			if output == "" || message.ToolCallID == "" {
 				continue
 			}
-			prompt := toolemulation.ActionOutputPrompt(message.ToolCallID, output)
-			if prompt != "" {
-				messages = append(messages, service.ChatMessage{Role: "user", Text: prompt})
-			}
+			messages = append(messages, service.ChatMessage{Role: "tool", Text: output, ToolCallID: message.ToolCallID})
 		}
 	}
 	if len(messages) == 0 {
