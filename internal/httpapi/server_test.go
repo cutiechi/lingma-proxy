@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"lingma-ipc-proxy/internal/service"
+	"lingma-ipc-proxy/internal/toolemulation"
 )
 
 func TestNormalizeOpenAIRequestCollectsSystemMessages(t *testing.T) {
@@ -306,6 +307,19 @@ func TestToolStreamFilterStreamsNormalTextWithTools(t *testing.T) {
 	out := strings.Join(chunks, "")
 	if !strings.Contains(out, "后续内容") {
 		t.Fatalf("streamed text = %q", out)
+	}
+}
+
+func TestShouldAggregateToolStreamRequiresOptIn(t *testing.T) {
+	t.Setenv("LINGMA_AGGREGATE_TOOL_STREAM", "")
+	req := service.ChatRequest{Tools: []toolemulation.ToolDef{{Name: "Bash"}}}
+	if shouldAggregateToolStream(req) {
+		t.Fatal("tool streams should remain incremental by default")
+	}
+
+	t.Setenv("LINGMA_AGGREGATE_TOOL_STREAM", "1")
+	if !shouldAggregateToolStream(req) {
+		t.Fatal("explicit aggregate env should enable aggregate tool streams")
 	}
 }
 

@@ -52,6 +52,17 @@ func TestContextWithOptionalTimeoutPositiveSetsDeadline(t *testing.T) {
 	}
 }
 
+func TestDescribeIPCSetupErrorClarifiesClosedLingmaBackend(t *testing.T) {
+	err := describeIPCSetupError("session setup", context.DeadlineExceeded)
+	if err == nil {
+		t.Fatal("expected wrapped error")
+	}
+	text := err.Error()
+	if !strings.Contains(text, "session setup timed out") || !strings.Contains(text, "重新打开 Lingma") {
+		t.Fatalf("unexpected error text: %s", text)
+	}
+}
+
 func TestBuildLingmaPromptOnlyInjectsToolingWhenEmulationEnabled(t *testing.T) {
 	req := ChatRequest{
 		Messages: []ChatMessage{{Role: "user", Text: "查看项目结构"}},

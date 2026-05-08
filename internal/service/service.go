@@ -34,6 +34,8 @@ const (
 	SessionModeReuse SessionMode = "reuse"
 )
 
+const ipcSetupTimeout = 15 * time.Second
+
 type Config struct {
 	Host                  string
 	Port                  int
@@ -229,6 +231,17 @@ func contextWithOptionalTimeout(parent context.Context, timeout time.Duration) (
 		return context.WithCancel(parent)
 	}
 	return context.WithTimeout(parent, timeout)
+}
+
+func describeIPCSetupError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "context deadline") {
+		return fmt.Errorf("Lingma IPC %s timed out after %s; Lingma 后台可能已退出，请重新打开 Lingma App 或 IDE 插件后重试: %w", operation, ipcSetupTimeout, err)
+	}
+	return err
 }
 
 func (s *Service) State() State {
@@ -687,9 +700,11 @@ func (s *Service) generateLocked(
 		return nil, errors.New("empty user message")
 	}
 
-	sessionID, err := s.resolveSession(requestCtx, ipcClient, effectiveMode)
+	setupCtx, setupCancel := context.WithTimeout(requestCtx, ipcSetupTimeout)
+	sessionID, err := s.resolveSession(setupCtx, ipcClient, effectiveMode)
+	setupCancel()
 	if err != nil {
-		return nil, err
+		return nil, describeIPCSetupError("session setup", err)
 	}
 	defer func() {
 		if effectiveMode == SessionModeReuse || strings.TrimSpace(sessionID) == "" {
@@ -717,16 +732,19 @@ func (s *Service) generateLocked(
 
 	modelID := strings.TrimSpace(internalModelID)
 	if modelID != "" && s.shouldSetModel(sessionID, effectiveMode, modelID) {
-		if err := ipcClient.Request(requestCtx, "session/set_model", map[string]any{
+		modelCtx, modelCancel := context.WithTimeout(requestCtx, ipcSetupTimeout)
+		err := ipcClient.Request(modelCtx, "session/set_model", map[string]any{
 			"sessionId": sessionID,
 			"modelId":   modelID,
 			"timestamp": time.Now().UnixMilli(),
 			"_meta":     meta,
-		}, nil); err != nil {
+		}, nil)
+		modelCancel()
+		if err != nil {
 			if effectiveMode == SessionModeReuse {
 				s.invalidateStickySession()
 			}
-			return nil, err
+			return nil, describeIPCSetupError("model setup", err)
 		}
 		s.rememberStickyModel(sessionID, modelID)
 	}

@@ -1208,7 +1208,7 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, r *http.Request, req 
 }
 
 func shouldAggregateToolStream(req service.ChatRequest) bool {
-	return len(req.Tools) > 0
+	return len(req.Tools) > 0 && truthyEnv("LINGMA_AGGREGATE_TOOL_STREAM")
 }
 
 type toolStreamFilter struct {

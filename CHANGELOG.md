@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.4.10 - 2026-05-08
+
+- Fixed a streaming regression introduced in v1.4.9: requests with `tools` now stream incrementally by default instead of being aggregated until the full response is complete.
+- Kept `LINGMA_AGGREGATE_TOOL_STREAM=1` as an explicit compatibility switch for clients that need full aggregation before tool-call emission.
+- Added regression coverage for tool-stream aggregation opt-in behavior.
+- Verified OpenAI and Anthropic streaming endpoints with tool schemas return incremental text deltas.
+- Added an IPC setup guard for image requests: if the Lingma app/plugin has been fully exited and `session/new` no longer responds, the proxy now fails fast with a clear reopen-Lingma hint instead of hanging until the client times out.
+
 ## v1.4.9 - 2026-05-07
 
 - Added Remote-mode image routing: image requests now use the proven Lingma IPC image pipeline instead of sending local/data URLs directly to the remote chat endpoint.

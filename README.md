@@ -13,7 +13,7 @@ The proxy now supports two backend modes:
 
 ## Current Version
 
-The current desktop line is `v1.4.9`.
+The current desktop line is `v1.4.10`.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
