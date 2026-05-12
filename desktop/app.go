@@ -867,34 +867,47 @@ func extractUsageFromJSON(raw string) (int, int) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return 0, 0
 	}
-	usage, ok := findUsageMap(payload)
+	input, output, ok := findUsageTokens(payload)
 	if !ok {
 		return 0, 0
 	}
-	input := intFromAny(usage["input_tokens"]) + intFromAny(usage["prompt_tokens"])
-	output := intFromAny(usage["output_tokens"]) + intFromAny(usage["completion_tokens"])
 	return input, output
 }
 
-func findUsageMap(value any) (map[string]any, bool) {
+func findUsageTokens(value any) (int, int, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
 		if usage, ok := typed["usage"].(map[string]any); ok {
-			return usage, true
+			return usageTokenPair(usage)
+		}
+		if input, output, ok := usageTokenPair(typed); ok {
+			return input, output, true
 		}
 		for _, child := range typed {
-			if usage, ok := findUsageMap(child); ok {
-				return usage, true
+			if input, output, ok := findUsageTokens(child); ok {
+				return input, output, true
 			}
 		}
 	case []any:
 		for _, child := range typed {
-			if usage, ok := findUsageMap(child); ok {
-				return usage, true
+			if input, output, ok := findUsageTokens(child); ok {
+				return input, output, true
 			}
 		}
 	}
-	return nil, false
+	return 0, 0, false
+}
+
+func usageTokenPair(value map[string]any) (int, int, bool) {
+	input := intFromAny(value["input_tokens"]) + intFromAny(value["prompt_tokens"])
+	output := intFromAny(value["output_tokens"]) + intFromAny(value["completion_tokens"])
+	if input > 0 || output > 0 {
+		return input, output, true
+	}
+	if intFromAny(value["total_tokens"]) > 0 {
+		return input, output, true
+	}
+	return 0, 0, false
 }
 
 func intFromAny(value any) int {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.4.13 - 2026-05-12
+
+- Fixed desktop Dashboard token statistics when third-party clients return flat token fields such as `prompt_tokens`, `completion_tokens`, and `total_tokens` without wrapping them inside a `usage` object.
+- 修复桌面端首页 Token 统计在第三方客户端返回平铺 token 字段时显示为 0 的问题；现在即使没有 `usage` 包裹，也会正确累计 `prompt_tokens`、`completion_tokens` 和 `total_tokens`。
+- Added desktop regression coverage for standard usage-wrapped responses, flat token responses, and SSE `data:` events carrying flat token fields.
+- 增加桌面端回归测试，覆盖标准 `usage` 结构、平铺 token 结构，以及 SSE `data:` 事件中的平铺 token 字段，避免后续兼容再次回退。
+
 ## v1.4.12 - 2026-05-08
 
 - Fixed OpenClaw-style image requests where the prompt is sent as a short OpenAI `system` message and the user message contains only `image_url`.

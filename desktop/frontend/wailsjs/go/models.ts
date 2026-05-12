@@ -1,14 +1,14 @@
 export namespace main {
-
+	
 	export class AppLog {
 	    time: string;
 	    level: string;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AppLog(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.time = source["time"];
@@ -33,11 +33,11 @@ export namespace main {
 	    remoteTokenExpireAt?: string;
 	    remoteTokenExpired: boolean;
 	    remoteCredentialError?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DetectionInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.listenUrl = source["listenUrl"];
@@ -61,11 +61,11 @@ export namespace main {
 	export class ModelInfo {
 	    id: string;
 	    name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ModelInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -79,11 +79,11 @@ export namespace main {
 	    models: number;
 	    model?: string;
 	    startedAt?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProxyStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.running = source["running"];
@@ -107,11 +107,11 @@ export namespace main {
 	    totalTokens?: number;
 	    reqBody?: string;
 	    respBody?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RequestRecord(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.time = source["time"];
@@ -137,11 +137,11 @@ export namespace main {
 	    byModel?: Record<string, number>;
 	    lastModel?: string;
 	    lastUpdated?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TokenStats(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.totalRequests = source["totalRequests"];
@@ -158,7 +158,7 @@ export namespace main {
 }
 
 export namespace service {
-
+	
 	export class Config {
 	    Host: string;
 	    Port: number;
@@ -178,11 +178,11 @@ export namespace service {
 	    Timeout: number;
 	    RemoteFallbackEnabled: boolean;
 	    RemoteFallbackModels: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Host = source["Host"];
@@ -207,3 +207,4 @@ export namespace service {
 	}
 
 }
+
