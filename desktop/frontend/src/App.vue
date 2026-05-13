@@ -1,21 +1,46 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import Dashboard from './views/Dashboard.vue'
 import Logs from './views/Logs.vue'
 import Models from './views/Models.vue'
 import Requests from './views/Requests.vue'
 import Settings from './views/Settings.vue'
-import { EventsOff, EventsOn } from '../wailsjs/runtime'
-import { ClearLogs, ForceQuitApp, GetLogs, GetStatus, HideWindow, MinimizeWindow } from '../wailsjs/go/main/App.js'
+import { ClipboardSetText, EventsOff, EventsOn } from '../wailsjs/runtime'
+import { ChooseFeedbackExportPath, ClearLogs, ExportFeedbackBundle, ForceQuitApp, GetLogs, GetStatus, HideWindow, MinimizeWindow, OpenPathInFileManager } from '../wailsjs/go/main/App.js'
 import lingmaIcon from './assets/images/lingma-icon.png'
 
 const currentTab = ref('dashboard')
+const selectedRequestId = ref(null)
 const logs = ref([])
 const status = ref({ running: false, addr: '', models: 0 })
 const toast = ref('')
 const themeMode = ref(localStorage.getItem('lingma-theme-mode') || 'system')
 const appliedTheme = ref('light')
 const forceQuitting = ref(false)
+const feedbackOpen = ref(false)
+const feedbackStep = ref('form')
+const feedbackBusy = ref(false)
+const feedbackResult = ref(null)
+const feedbackRanges = [
+  { value: '30m', label: '最近 30 分钟' },
+  { value: '2h', label: '最近 2 小时' },
+  { value: '24h', label: '最近 24 小时' },
+  { value: '7d', label: '最近 7 天' },
+  { value: 'all', label: '全部' },
+  { value: 'custom', label: '自定义时间段' },
+]
+const feedbackForm = reactive({
+  rangePreset: '30m',
+  startAt: '',
+  endAt: '',
+  includeAppLogs: true,
+  includeRequests: true,
+  includeConfigSummary: true,
+  includeEnvironment: true,
+  includeDetectionInfo: true,
+  issueDescription: '',
+  savePath: '',
+})
 let systemThemeQuery = null
 let toastTimer = null
 
@@ -59,6 +84,15 @@ function setStatus(nextStatus) {
 function handleNotice(message) {
   showToast(message)
   addLog('info', message)
+}
+
+function handleOpenRequestDetail(requestId) {
+  selectedRequestId.value = requestId
+  currentTab.value = 'requests'
+  // 清除选中状态，以便下次点击同一个请求时也能触发
+  setTimeout(() => {
+    selectedRequestId.value = null
+  }, 500)
 }
 
 function resolveTheme() {
@@ -115,6 +149,71 @@ async function forceQuitApp() {
   } catch (e) {
     forceQuitting.value = false
     addLog('error', '退出应用失败：' + (e.message || String(e)))
+  }
+}
+
+function openFeedbackDialog() {
+  feedbackOpen.value = true
+  feedbackStep.value = 'form'
+  feedbackResult.value = null
+}
+
+function closeFeedbackDialog() {
+  if (feedbackBusy.value) return
+  feedbackOpen.value = false
+}
+
+async function chooseFeedbackPath() {
+  try {
+    const path = await ChooseFeedbackExportPath()
+    if (path) {
+      feedbackForm.savePath = path
+    }
+  } catch (e) {
+    addLog('error', '选择反馈包保存位置失败：' + (e.message || String(e)))
+  }
+}
+
+async function exportFeedbackBundle() {
+  feedbackBusy.value = true
+  try {
+    const result = await ExportFeedbackBundle({ ...feedbackForm })
+    if (!result?.zipPath) {
+      feedbackBusy.value = false
+      return
+    }
+    feedbackResult.value = result
+    feedbackForm.savePath = result.zipPath
+    feedbackStep.value = 'result'
+    handleNotice('反馈日志包已生成')
+  } catch (e) {
+    addLog('error', '导出反馈日志包失败：' + (e.message || String(e)))
+    showToast('导出反馈日志包失败')
+  } finally {
+    feedbackBusy.value = false
+  }
+}
+
+async function openFeedbackFolder() {
+  if (!feedbackResult.value?.zipPath) return
+  try {
+    await OpenPathInFileManager(feedbackResult.value.zipPath)
+  } catch (e) {
+    addLog('error', '打开反馈包目录失败：' + (e.message || String(e)))
+  }
+}
+
+async function copyValue(value, label) {
+  try {
+    await ClipboardSetText(value || '')
+    showToast(`已复制${label}`)
+  } catch (e) {
+    try {
+      await navigator.clipboard?.writeText(value || '')
+      showToast(`已复制${label}`)
+    } catch (fallbackError) {
+      addLog('error', `${label}复制失败：` + (fallbackError.message || String(fallbackError)))
+    }
   }
 }
 
@@ -252,7 +351,7 @@ onUnmounted(() => {
         <span class="status-dot" :class="{ running: status.running }"></span>
         <div>
           <strong>{{ status.running ? 'Proxy Running' : 'Proxy Stopped' }}</strong>
-          <small>v1.4.13</small>
+          <small>v1.4.15</small>
         </div>
       </div>
     </aside>
@@ -270,6 +369,9 @@ onUnmounted(() => {
           <button class="icon-button" type="button" title="设置" @click="currentTab = 'settings'">
             <i class="bi bi-gear" aria-hidden="true"></i>
           </button>
+          <button class="icon-button feedback-icon-button" type="button" title="反馈问题" @click="openFeedbackDialog">
+            <i class="bi bi-bug" aria-hidden="true"></i>
+          </button>
           <button class="icon-button" type="button" :title="themeTitle()" @click="toggleTheme">
             <i class="bi" :class="themeIcon()" aria-hidden="true"></i>
           </button>
@@ -280,22 +382,143 @@ onUnmounted(() => {
       </header>
 
       <main class="view-stage">
-        <Dashboard
-          v-if="currentTab === 'dashboard'"
-          :shell-status="status"
-          @log="addLog"
-          @status="setStatus"
-          @notice="handleNotice"
-          @open-settings="currentTab = 'settings'"
-          @open-requests="currentTab = 'requests'"
-          @open-models="currentTab = 'models'"
-        />
-        <Requests v-else-if="currentTab === 'requests'" @notice="handleNotice" />
-        <Models v-else-if="currentTab === 'models'" @log="addLog" @status="setStatus" @notice="handleNotice" />
+        <KeepAlive>
+          <Dashboard
+            v-if="currentTab === 'dashboard'"
+            :shell-status="status"
+            @log="addLog"
+            @status="setStatus"
+            @notice="handleNotice"
+            @open-settings="currentTab = 'settings'"
+            @open-requests="currentTab = 'requests'"
+            @open-models="currentTab = 'models'"
+            @open-request-detail="handleOpenRequestDetail"
+          />
+          <Requests v-else-if="currentTab === 'requests'" :selected-request-id="selectedRequestId" @notice="handleNotice" />
+        </KeepAlive>
+        <Models v-if="currentTab === 'models'" @log="addLog" @status="setStatus" @notice="handleNotice" />
         <Settings v-else-if="currentTab === 'settings'" @log="addLog" @status-refresh="refreshStatus" />
         <Logs v-else-if="currentTab === 'logs'" :logs="logs" @clear="clearLocalLogs" @notice="handleNotice" />
       </main>
     </section>
     <div v-if="toast" class="toast">{{ toast }}</div>
+    <div v-if="feedbackOpen" class="modal-backdrop" @click.self="closeFeedbackDialog">
+      <section class="modal-card feedback-modal">
+        <div class="modal-header">
+          <div>
+            <h2>反馈问题</h2>
+            <p>导出脱敏后的反馈日志包，便于通过 GitHub Issue 或其他沟通渠道反馈问题。</p>
+          </div>
+          <button class="icon-button" type="button" title="关闭" :disabled="feedbackBusy" @click="closeFeedbackDialog">
+            <i class="bi bi-x-lg" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div v-if="feedbackStep === 'form'" class="modal-body feedback-form">
+          <div class="field">
+            <label>收集范围</label>
+            <div class="chip-options">
+              <button
+                v-for="range in feedbackRanges"
+                :key="range.value"
+                class="chip-option"
+                :class="{ active: feedbackForm.rangePreset === range.value }"
+                type="button"
+                @click="feedbackForm.rangePreset = range.value"
+              >
+                {{ range.label }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="feedbackForm.rangePreset === 'custom'" class="form-grid">
+            <div class="field">
+              <label>开始时间</label>
+              <input v-model="feedbackForm.startAt" type="datetime-local" />
+            </div>
+            <div class="field">
+              <label>结束时间</label>
+              <input v-model="feedbackForm.endAt" type="datetime-local" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>包含内容</label>
+            <div class="checkbox-grid">
+              <label class="checkbox-item">
+                <input v-model="feedbackForm.includeAppLogs" type="checkbox" />
+                <span>应用日志</span>
+              </label>
+              <label class="checkbox-item">
+                <input v-model="feedbackForm.includeRequests" type="checkbox" />
+                <span>请求日志</span>
+              </label>
+              <label class="checkbox-item">
+                <input v-model="feedbackForm.includeConfigSummary" type="checkbox" />
+                <span>当前配置摘要</span>
+              </label>
+              <label class="checkbox-item">
+                <input v-model="feedbackForm.includeEnvironment" type="checkbox" />
+                <span>运行环境信息</span>
+              </label>
+              <label class="checkbox-item">
+                <input v-model="feedbackForm.includeDetectionInfo" type="checkbox" />
+                <span>探测结果信息</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="hint-box">
+            <strong>隐私说明</strong>
+            <span>默认脱敏 token、cookie、机器标识、图片 base64 和大请求体敏感字段；不打包明文登录态缓存，也不默认导出无限长完整请求体。</span>
+          </div>
+
+          <div class="field">
+            <label>问题描述</label>
+            <textarea v-model="feedbackForm.issueDescription" placeholder="补充描述你遇到的问题、触发步骤和预期结果。" />
+          </div>
+
+          <div class="field">
+            <label>保存位置</label>
+            <div class="inline-action-row">
+              <input v-model="feedbackForm.savePath" type="text" readonly placeholder="点击右侧按钮选择导出位置" />
+              <button class="secondary-button" type="button" @click="chooseFeedbackPath">选择位置</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="modal-body feedback-result">
+          <div class="feedback-result-row">
+            <label>已生成</label>
+            <strong>{{ feedbackResult?.zipFilename }}</strong>
+          </div>
+          <div class="feedback-result-row">
+            <label>保存位置</label>
+            <code>{{ feedbackResult?.zipPath }}</code>
+          </div>
+          <div class="feedback-result-row">
+            <label>导出内容</label>
+            <span>{{ feedbackResult?.appLogCount }} 条应用日志，{{ feedbackResult?.requestCount }} 条请求记录</span>
+          </div>
+          <div class="hint-box">
+            <strong>使用说明</strong>
+            <span>请将刚生成的反馈压缩包提交到 GitHub Issue，或通过你自己的沟通渠道发送给维护者。软件本身不内置邮件发送能力。</span>
+          </div>
+          <div class="button-row wrap">
+            <button class="primary-button" type="button" @click="openFeedbackFolder">打开文件所在目录</button>
+            <button class="secondary-button" type="button" @click="copyValue(feedbackResult?.zipPath, '附件路径')">复制附件路径</button>
+            <button class="secondary-button" type="button" @click="copyValue(feedbackResult?.shareText, '反馈说明')">复制反馈说明</button>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button v-if="feedbackStep === 'form'" class="secondary-button" type="button" :disabled="feedbackBusy" @click="closeFeedbackDialog">取消</button>
+          <button v-else class="secondary-button" type="button" :disabled="feedbackBusy" @click="closeFeedbackDialog">关闭</button>
+          <button v-if="feedbackStep === 'form'" class="primary-button" type="button" :disabled="feedbackBusy" @click="exportFeedbackBundle">
+            {{ feedbackBusy ? '导出中...' : '导出反馈包' }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>

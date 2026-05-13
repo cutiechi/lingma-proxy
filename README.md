@@ -13,7 +13,7 @@ The proxy now supports two backend modes:
 
 ## Current Version
 
-The current desktop line is `v1.4.11`.
+The current desktop line is `v1.4.15`.
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
@@ -46,7 +46,9 @@ The desktop app wraps the proxy with a native-feeling control panel:
 
 - Start, stop, and restart the proxy.
 - Inspect health, latency, recent requests, models, settings, and logs.
+- Jump from Dashboard recent requests directly into the full Requests detail view.
 - View full request and response bodies with internal scrolling and hidden scrollbars.
+- Export redacted feedback bundles for troubleshooting without bundling raw login caches or unlimited request payloads.
 - Copy endpoint URLs, model IDs, request logs, and response logs with visible feedback.
 - Detect Lingma IPC paths automatically on macOS and Windows, with manual fallback settings.
 - Follow system theme automatically, or switch light/dark mode manually.

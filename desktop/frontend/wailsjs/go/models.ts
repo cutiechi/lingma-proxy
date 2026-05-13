@@ -1,6 +1,7 @@
 export namespace main {
 	
 	export class AppLog {
+	    createdAt?: string;
 	    time: string;
 	    level: string;
 	    message: string;
@@ -11,6 +12,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.createdAt = source["createdAt"];
 	        this.time = source["time"];
 	        this.level = source["level"];
 	        this.message = source["message"];
@@ -58,6 +60,60 @@ export namespace main {
 	        this.remoteCredentialError = source["remoteCredentialError"];
 	    }
 	}
+	export class FeedbackExportOptions {
+	    rangePreset: string;
+	    startAt?: string;
+	    endAt?: string;
+	    includeAppLogs: boolean;
+	    includeRequests: boolean;
+	    includeConfigSummary: boolean;
+	    includeEnvironment: boolean;
+	    includeDetectionInfo: boolean;
+	    issueDescription?: string;
+	    savePath?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FeedbackExportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rangePreset = source["rangePreset"];
+	        this.startAt = source["startAt"];
+	        this.endAt = source["endAt"];
+	        this.includeAppLogs = source["includeAppLogs"];
+	        this.includeRequests = source["includeRequests"];
+	        this.includeConfigSummary = source["includeConfigSummary"];
+	        this.includeEnvironment = source["includeEnvironment"];
+	        this.includeDetectionInfo = source["includeDetectionInfo"];
+	        this.issueDescription = source["issueDescription"];
+	        this.savePath = source["savePath"];
+	    }
+	}
+	export class FeedbackExportResult {
+	    zipPath: string;
+	    zipFilename: string;
+	    saveDir: string;
+	    shareText: string;
+	    exportedAt: string;
+	    appLogCount: number;
+	    requestCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FeedbackExportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.zipPath = source["zipPath"];
+	        this.zipFilename = source["zipFilename"];
+	        this.saveDir = source["saveDir"];
+	        this.shareText = source["shareText"];
+	        this.exportedAt = source["exportedAt"];
+	        this.appLogCount = source["appLogCount"];
+	        this.requestCount = source["requestCount"];
+	    }
+	}
 	export class ModelInfo {
 	    id: string;
 	    name: string;
@@ -95,6 +151,7 @@ export namespace main {
 	    }
 	}
 	export class RequestRecord {
+	    createdAt?: string;
 	    time: string;
 	    method: string;
 	    path: string;
@@ -114,6 +171,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.createdAt = source["createdAt"];
 	        this.time = source["time"];
 	        this.method = source["method"];
 	        this.path = source["path"];

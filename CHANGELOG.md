@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v1.4.15 - 2026-05-13
+
+- Added desktop request-detail jump flow: clicking a recent request on the Dashboard now opens the Requests page, scrolls to the matching record, and expands its full request/response details after data loads.
+- Added smarter desktop request timestamps: request tables now show `今天` / `昨天` / `MM/DD HH:mm:ss` instead of time-only values, making cross-day debugging easier.
+- Added backward-compatible timestamp recovery for legacy desktop request history that only stored `HH:mm:ss`; if old entries still look wrong after migration, clear request history once and all newly recorded entries will use full timestamps.
+- Added export-only feedback bundles in the desktop app, including redacted app logs, request logs, config summary, environment summary, and detection info for issue reporting without bundling raw credentials.
+- Refined Dashboard health metrics with explicit `ms` / `s` / `min` units, restored `Avg / P50 / P95 / Max` labels, and hover explanations for each latency statistic.
+- 增加桌面端请求详情跳转能力：点击首页最近请求可直接打开请求流页面，自动滚动并展开对应记录，减少手动查找路径。
+- 增加桌面端请求时间智能格式化：请求列表改为显示“今天 / 昨天 / 月日+时间”，跨天排查时不再只有裸时间。
+- 增加旧桌面请求历史的时间兼容修复：对只保存 `HH:mm:ss` 的旧记录做回填；如果历史记录迁移后仍不准确，清空一次请求记录，后续新记录会完整保存时间戳并稳定显示日期。
+- 增加桌面端脱敏反馈包导出：可导出应用日志、请求日志、配置摘要、运行环境与探测信息，默认不打包明文登录态和无限长原始请求体。
+- 优化首页健康指标显示：延迟数值改为明确的 `ms / s / min` 单位，恢复 `Avg / P50 / P95 / Max` 标签，并提供悬浮解释说明。
+
 ## v1.4.13 - 2026-05-12
 
 - Fixed desktop Dashboard token statistics when third-party clients return flat token fields such as `prompt_tokens`, `completion_tokens`, and `total_tokens` without wrapping them inside a `usage` object.

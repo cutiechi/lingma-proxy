@@ -1,8 +1,15 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ClearRequests, GetRequests } from '../../wailsjs/go/main/App.js'
 import { ClipboardSetText, EventsOff, EventsOn } from '../../wailsjs/runtime'
 import JsonViewer from '../components/JsonViewer.vue'
+
+const props = defineProps({
+  selectedRequestId: {
+    type: String,
+    default: null
+  }
+})
 
 const emit = defineEmits(['notice'])
 
@@ -10,6 +17,7 @@ const requests = ref([])
 const selected = ref(null)
 const query = ref('')
 const activeStatus = ref('all')
+const pendingSelectId = ref(null)
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -28,6 +36,11 @@ const filtered = computed(() => {
 async function refresh() {
   try {
     requests.value = await GetRequests()
+    // 数据加载完成后，如果有待选中的请求 ID，执行选中
+    if (pendingSelectId.value) {
+      selectRequestById(pendingSelectId.value)
+      pendingSelectId.value = null
+    }
   } catch (e) {
     console.debug('Wails GetRequests unavailable in browser preview')
   }
@@ -52,6 +65,38 @@ function statusClass(code) {
 function selectRow(index) {
   selected.value = selected.value === index ? null : index
 }
+
+function selectRequestById(requestId) {
+  if (!requestId) return
+  const index = filtered.value.findIndex(req => req.createdAt === requestId || req.time === requestId)
+  if (index !== -1) {
+    selected.value = index
+    // 滚动到选中的行
+    setTimeout(() => {
+      const row = document.querySelector('.data-table tbody tr.selected')
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 100)
+  } else if (requests.value.length === 0) {
+    // 如果数据还没加载，保存待选中的 ID
+    pendingSelectId.value = requestId
+  }
+}
+
+watch(() => props.selectedRequestId, (newId) => {
+  if (newId) {
+    selectRequestById(newId)
+  }
+}, { immediate: true })
+
+// 监听 requests 数据变化，如果有待选中的 ID 则执行选中
+watch(() => requests.value.length, (newLength, oldLength) => {
+  if (newLength > 0 && oldLength === 0 && pendingSelectId.value) {
+    selectRequestById(pendingSelectId.value)
+    pendingSelectId.value = null
+  }
+})
 
 async function writeClipboard(text) {
   const value = text || ''
@@ -88,6 +133,33 @@ function safeEventsOff(name) {
   } catch (e) {
     console.debug('Wails runtime event unavailable:', name)
   }
+}
+
+function formatDateTime(request) {
+  if (request.createdAt) {
+    try {
+      const date = new Date(request.createdAt)
+      const now = new Date()
+      const isToday = date.toDateString() === now.toDateString()
+      const yesterday = new Date(now)
+      yesterday.setDate(yesterday.getDate() - 1)
+      const isYesterday = date.toDateString() === yesterday.toDateString()
+
+      const timeStr = date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+      if (isToday) {
+        return `今天 ${timeStr}`
+      } else if (isYesterday) {
+        return `昨天 ${timeStr}`
+      } else {
+        const dateStr = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+        return `${dateStr} ${timeStr}`
+      }
+    } catch (e) {
+      return request.time || '-'
+    }
+  }
+  return request.time || '-'
 }
 
 onMounted(() => {
@@ -148,7 +220,7 @@ onUnmounted(() => {
               :class="{ selected: selected === index }"
               @click="selectRow(index)"
             >
-              <td>{{ request.time }}</td>
+              <td>{{ formatDateTime(request) }}</td>
               <td><span class="method-chip">{{ request.method }}</span></td>
               <td>
                 <div class="cell-main">{{ request.path }}</div>

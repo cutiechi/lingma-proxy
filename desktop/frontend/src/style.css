@@ -726,6 +726,8 @@ button {
   height: 126px;
   gap: 4px;
   padding: 18px 12px 10px;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.8), rgba(255, 255, 255, 0.42));
@@ -759,12 +761,37 @@ button {
   grid-template-columns: repeat(4, 1fr);
   gap: 0;
   margin-top: 12px;
+  min-width: 0;
   border-top: 1px solid var(--line);
+}
+
+.health-explainer-float {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 92px;
+  z-index: 2;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+:root[data-theme='dark'] .health-explainer-float {
+  background: rgba(15, 23, 42, 0.92);
 }
 
 .health-stats div {
   padding: 12px 8px 2px;
+  min-width: 0;
   border-left: 1px solid var(--line);
+  cursor: default;
 }
 
 .health-stats div:first-child {
@@ -773,12 +800,19 @@ button {
 
 .health-stats strong {
   display: block;
-  font-size: 18px;
+  max-width: 100%;
+  overflow: visible;
+  font-size: 13px;
+  min-height: 18px;
+  line-height: 1.1;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .health-stats span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 .bar {
@@ -947,7 +981,7 @@ button {
   position: fixed;
   right: 22px;
   bottom: 22px;
-  z-index: 20;
+  z-index: 60;
   max-width: min(420px, calc(100vw - 44px));
   padding: 11px 14px;
   color: var(--text);
@@ -957,6 +991,173 @@ button {
   box-shadow: var(--shadow);
   font-size: 13px;
   font-weight: 680;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(88vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-footer {
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 760;
+}
+
+.modal-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.modal-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.feedback-form {
+  align-content: start;
+}
+
+.feedback-result {
+  align-content: start;
+}
+
+.feedback-result-row {
+  display: grid;
+  gap: 6px;
+}
+
+.feedback-result-row label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.feedback-result-row strong,
+.feedback-result-row code,
+.feedback-result-row span {
+  overflow-wrap: anywhere;
+}
+
+.feedback-result-row code {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.chip-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-option {
+  min-height: 32px;
+  padding: 0 12px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.chip-option.active {
+  color: #133a8b;
+  border-color: rgba(37, 99, 235, 0.24);
+  background: rgba(226, 237, 255, 0.92);
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  writing-mode: horizontal-tb;
+}
+
+.checkbox-item span {
+  min-width: 0;
+  white-space: normal;
+  writing-mode: horizontal-tb;
+}
+
+.field .checkbox-item input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+  .checkbox-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.inline-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.button-row.wrap {
+  flex-wrap: wrap;
 }
 
 .radio-dot {
@@ -1164,6 +1365,15 @@ button {
   box-shadow: inset 3px 0 0 var(--blue);
 }
 
+.data-table tbody tr.clickable-row {
+  cursor: pointer;
+}
+
+.data-table tbody tr.clickable-row:hover {
+  background: rgba(219, 234, 254, 0.75);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
 :root[data-theme='dark'] .data-table {
   background: rgba(15, 23, 42, 0.8);
 }
@@ -1183,6 +1393,11 @@ button {
 :root[data-theme='dark'] .data-table tbody tr.selected {
   background: rgba(38, 65, 112, 0.96);
   box-shadow: inset 3px 0 0 #67a1ff;
+}
+
+:root[data-theme='dark'] .data-table tbody tr.clickable-row:hover {
+  background: rgba(51, 75, 115, 0.92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .chip,
@@ -1298,6 +1513,17 @@ button {
 .danger-icon-button:hover {
   color: #991b1b;
   background: rgba(254, 202, 202, 0.88);
+}
+
+.feedback-icon-button {
+  color: #9a6700;
+  border-color: rgba(217, 119, 6, 0.24);
+  background: rgba(255, 247, 237, 0.92);
+}
+
+.feedback-icon-button:hover {
+  color: #7c2d12;
+  background: rgba(255, 237, 213, 0.96);
 }
 
 .primary-button:hover,
@@ -1983,6 +2209,17 @@ button:disabled {
 :root[data-theme='dark'] .danger-icon-button:hover {
   color: #fff1f2;
   background: rgba(153, 27, 27, 0.62);
+}
+
+:root[data-theme='dark'] .feedback-icon-button {
+  color: #ffd089;
+  border-color: rgba(251, 191, 36, 0.28);
+  background: rgba(120, 53, 15, 0.34);
+}
+
+:root[data-theme='dark'] .feedback-icon-button:hover {
+  color: #ffe7bf;
+  background: rgba(146, 64, 14, 0.48);
 }
 
 :root[data-theme='dark'] .strip-actions {

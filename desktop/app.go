@@ -1,13 +1,17 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -22,9 +26,18 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const (
+	desktopAppVersion          = "1.4.15"
+	feedbackPayloadCharLimit   = 16000
+	feedbackStringFieldLimit   = 4096
+	feedbackDefaultRangePreset = "30m"
+	feedbackDesktopFolderName  = "Lingma Proxy Feedback"
+)
+
 // App struct
 // RequestRecord stores a single HTTP request summary
 type RequestRecord struct {
+	CreatedAt    string `json:"createdAt,omitempty"`
 	Time         string `json:"time"`
 	Method       string `json:"method"`
 	Path         string `json:"path"`
@@ -40,9 +53,10 @@ type RequestRecord struct {
 }
 
 type AppLog struct {
-	Time    string `json:"time"`
-	Level   string `json:"level"`
-	Message string `json:"message"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	Time      string `json:"time"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
 }
 
 type TokenStats struct {
@@ -107,6 +121,34 @@ type DetectionInfo struct {
 	RemoteTokenExpireAt     string `json:"remoteTokenExpireAt,omitempty"`
 	RemoteTokenExpired      bool   `json:"remoteTokenExpired"`
 	RemoteCredentialError   string `json:"remoteCredentialError,omitempty"`
+}
+
+type FeedbackExportOptions struct {
+	RangePreset          string `json:"rangePreset"`
+	StartAt              string `json:"startAt,omitempty"`
+	EndAt                string `json:"endAt,omitempty"`
+	IncludeAppLogs       bool   `json:"includeAppLogs"`
+	IncludeRequests      bool   `json:"includeRequests"`
+	IncludeConfigSummary bool   `json:"includeConfigSummary"`
+	IncludeEnvironment   bool   `json:"includeEnvironment"`
+	IncludeDetectionInfo bool   `json:"includeDetectionInfo"`
+	IssueDescription     string `json:"issueDescription,omitempty"`
+	SavePath             string `json:"savePath,omitempty"`
+}
+
+type FeedbackExportResult struct {
+	ZipPath      string `json:"zipPath"`
+	ZipFilename  string `json:"zipFilename"`
+	SaveDir      string `json:"saveDir"`
+	ShareText    string `json:"shareText"`
+	ExportedAt   string `json:"exportedAt"`
+	AppLogCount  int    `json:"appLogCount"`
+	RequestCount int    `json:"requestCount"`
+}
+
+type feedbackZipEntry struct {
+	name string
+	body []byte
 }
 
 // NewApp creates a new App application struct
@@ -250,9 +292,10 @@ func (a *App) forceQuit() {
 
 func (a *App) emitLog(level string, message string) {
 	entry := AppLog{
-		Time:    time.Now().Format("15:04:05"),
-		Level:   level,
-		Message: message,
+		CreatedAt: time.Now().Format(time.RFC3339),
+		Time:      time.Now().Format("15:04:05"),
+		Level:     level,
+		Message:   message,
 	}
 	a.mu.Lock()
 	a.logs = append(a.logs, entry)
@@ -439,6 +482,7 @@ func (a *App) StartProxy() error {
 		inputTokens, outputTokens := extractTokenUsage(respBody)
 		model := extractRequestModel(reqBody)
 		record := RequestRecord{
+			CreatedAt:    time.Now().Format(time.RFC3339),
 			Time:         time.Now().Format("15:04:05"),
 			Method:       method,
 			Path:         path,
@@ -521,6 +565,142 @@ func (a *App) ClearLogs() {
 	a.saveAppStateLocked()
 	a.mu.Unlock()
 	runtime.EventsEmit(a.ctx, "logs:updated", a.GetLogs())
+}
+
+func (a *App) ChooseFeedbackExportPath() (string, error) {
+	defaultPath, err := defaultFeedbackExportPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(defaultPath), 0755); err != nil {
+		return "", err
+	}
+	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:                "保存反馈日志包",
+		DefaultDirectory:     filepath.Dir(defaultPath),
+		DefaultFilename:      filepath.Base(defaultPath),
+		CanCreateDirectories: true,
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "Zip 压缩包 (*.zip)",
+				Pattern:     "*.zip",
+			},
+		},
+	})
+}
+
+func (a *App) ExportFeedbackBundle(options FeedbackExportOptions) (FeedbackExportResult, error) {
+	result := FeedbackExportResult{}
+
+	savePath := strings.TrimSpace(options.SavePath)
+	if savePath == "" {
+		var err error
+		savePath, err = a.ChooseFeedbackExportPath()
+		if err != nil {
+			return result, err
+		}
+	}
+	if savePath == "" {
+		return result, nil
+	}
+	if !strings.HasSuffix(strings.ToLower(savePath), ".zip") {
+		savePath += ".zip"
+	}
+
+	startAt, endAt, err := resolveFeedbackRange(options)
+	if err != nil {
+		return result, err
+	}
+
+	a.mu.RLock()
+	logs := cloneLogs(a.logs)
+	requests := cloneRequests(a.requests)
+	stats := a.stats
+	cfg := a.cfg
+	status := ProxyStatus{
+		Running:   a.running,
+		Addr:      a.addr,
+		Backend:   string(a.cfg.Backend),
+		Models:    len(a.models),
+		Model:     a.cfg.Model,
+		StartedAt: a.startedAt.Format(time.RFC3339),
+	}
+	a.mu.RUnlock()
+
+	filteredLogs := filterLogsByRange(logs, startAt, endAt)
+	filteredRequests := filterRequestsByRange(requests, startAt, endAt)
+	sanitizedLogs := sanitizeLogs(filteredLogs)
+	sanitizedRequests := sanitizeRequests(filteredRequests)
+	manifest := buildFeedbackManifest(options, startAt, endAt, sanitizedLogs, sanitizedRequests)
+
+	entries := make([]feedbackZipEntry, 0, 7)
+	entries = append(entries, feedbackZipEntry{name: "manifest.json", body: mustJSON(manifest)})
+	if options.IncludeAppLogs {
+		entries = append(entries, feedbackZipEntry{name: "app-logs.json", body: mustJSON(sanitizedLogs)})
+	}
+	if options.IncludeRequests {
+		entries = append(entries, feedbackZipEntry{name: "request-logs.json", body: mustJSON(sanitizedRequests)})
+	}
+	if options.IncludeConfigSummary {
+		entries = append(entries, feedbackZipEntry{name: "config-summary.json", body: mustJSON(buildConfigSummary(cfg, stats, status))})
+	}
+	if options.IncludeEnvironment {
+		entries = append(entries, feedbackZipEntry{name: "environment.json", body: mustJSON(buildEnvironmentSummary(cfg))})
+	}
+	if options.IncludeDetectionInfo {
+		entries = append(entries, feedbackZipEntry{name: "detection-info.json", body: mustJSON(a.GetDetectionInfo())})
+	}
+	note := strings.TrimSpace(options.IssueDescription)
+	if note != "" {
+		entries = append(entries, feedbackZipEntry{name: "user-note.txt", body: []byte(note + "\n")})
+	}
+
+	if err := os.MkdirAll(filepath.Dir(savePath), 0755); err != nil {
+		return result, err
+	}
+	if err := writeFeedbackZip(savePath, entries); err != nil {
+		return result, err
+	}
+
+	exportedAt := time.Now()
+	shareText := buildFeedbackShareText(options, cfg, status, startAt, endAt, filepath.Base(savePath))
+	result = FeedbackExportResult{
+		ZipPath:      savePath,
+		ZipFilename:  filepath.Base(savePath),
+		SaveDir:      filepath.Dir(savePath),
+		ShareText:    shareText,
+		ExportedAt:   exportedAt.Format("2006/01/02 15:04:05"),
+		AppLogCount:  len(sanitizedLogs),
+		RequestCount: len(sanitizedRequests),
+	}
+	a.emitLog("info", fmt.Sprintf("反馈日志包已导出：%s", savePath))
+	return result, nil
+}
+
+func (a *App) OpenPathInFileManager(path string) error {
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return fmt.Errorf("path is required")
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+	openPath := target
+	if !info.IsDir() {
+		openPath = filepath.Dir(target)
+	}
+
+	var cmd *exec.Cmd
+	switch goruntime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", openPath)
+	case "windows":
+		cmd = exec.Command("explorer", filepath.Clean(openPath))
+	default:
+		cmd = exec.Command("xdg-open", openPath)
+	}
+	return cmd.Start()
 }
 
 // StopProxy stops the proxy server
@@ -721,6 +901,7 @@ func (a *App) loadAppState() error {
 	if err != nil {
 		return err
 	}
+	info, statErr := os.Stat(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -732,6 +913,15 @@ func (a *App) loadAppState() error {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
+	migrated := false
+	if statErr == nil {
+		if backfillRequestCreatedAt(state.Requests, info.ModTime()) {
+			migrated = true
+		}
+		if backfillLogCreatedAt(state.Logs, info.ModTime()) {
+			migrated = true
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.requests = state.Requests
@@ -741,6 +931,9 @@ func (a *App) loadAppState() error {
 		a.stats.ByModel = map[string]int{}
 	}
 	a.reconcileTokenStatsLocked()
+	if migrated {
+		a.saveAppStateLocked()
+	}
 	return nil
 }
 
@@ -922,6 +1115,497 @@ func intFromAny(value any) int {
 	default:
 		return 0
 	}
+}
+
+func cloneLogs(src []AppLog) []AppLog {
+	out := make([]AppLog, len(src))
+	copy(out, src)
+	return out
+}
+
+func cloneRequests(src []RequestRecord) []RequestRecord {
+	out := make([]RequestRecord, len(src))
+	copy(out, src)
+	return out
+}
+
+func defaultFeedbackExportPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().Format("2006-01-02-15-04-05")
+	return filepath.Join(home, "Desktop", feedbackDesktopFolderName, fmt.Sprintf("LingmaProxy-feedback-%s.zip", now)), nil
+}
+
+func resolveFeedbackRange(options FeedbackExportOptions) (time.Time, time.Time, error) {
+	now := time.Now()
+	endAt := now
+	preset := strings.TrimSpace(options.RangePreset)
+	if preset == "" {
+		preset = feedbackDefaultRangePreset
+	}
+	switch preset {
+	case "30m":
+		return now.Add(-30 * time.Minute), endAt, nil
+	case "2h":
+		return now.Add(-2 * time.Hour), endAt, nil
+	case "24h":
+		return now.Add(-24 * time.Hour), endAt, nil
+	case "7d":
+		return now.Add(-7 * 24 * time.Hour), endAt, nil
+	case "all":
+		return time.Time{}, endAt, nil
+	case "custom":
+		startAt, err := parseFeedbackTime(options.StartAt)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid start time: %w", err)
+		}
+		customEndAt, err := parseFeedbackTime(options.EndAt)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid end time: %w", err)
+		}
+		if customEndAt.Before(startAt) {
+			return time.Time{}, time.Time{}, errors.New("end time must be after start time")
+		}
+		return startAt, customEndAt, nil
+	default:
+		return now.Add(-30 * time.Minute), endAt, nil
+	}
+}
+
+func parseFeedbackTime(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, errors.New("time is required")
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04",
+		"2006-01-02 15:04",
+	}
+	for _, layout := range layouts {
+		if ts, err := time.ParseInLocation(layout, trimmed, time.Local); err == nil {
+			return ts, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported time format: %s", trimmed)
+}
+
+func filterLogsByRange(logs []AppLog, startAt, endAt time.Time) []AppLog {
+	if startAt.IsZero() {
+		return logs
+	}
+	filtered := make([]AppLog, 0, len(logs))
+	for _, entry := range logs {
+		ts, ok := parseRecordTimestamp(entry.CreatedAt)
+		if !ok {
+			continue
+		}
+		if !ts.Before(startAt) && !ts.After(endAt) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func filterRequestsByRange(requests []RequestRecord, startAt, endAt time.Time) []RequestRecord {
+	if startAt.IsZero() {
+		return requests
+	}
+	filtered := make([]RequestRecord, 0, len(requests))
+	for _, entry := range requests {
+		ts, ok := parseRecordTimestamp(entry.CreatedAt)
+		if !ok {
+			continue
+		}
+		if !ts.Before(startAt) && !ts.After(endAt) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func parseRecordTimestamp(value string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, trimmed)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
+}
+
+func backfillRequestCreatedAt(records []RequestRecord, anchor time.Time) bool {
+	return backfillCreatedAt(anchor, len(records), func(i int) string {
+		return records[i].CreatedAt
+	}, func(i int) string {
+		return records[i].Time
+	}, func(i int, value string) {
+		records[i].CreatedAt = value
+	})
+}
+
+func backfillLogCreatedAt(records []AppLog, anchor time.Time) bool {
+	return backfillCreatedAt(anchor, len(records), func(i int) string {
+		return records[i].CreatedAt
+	}, func(i int) string {
+		return records[i].Time
+	}, func(i int, value string) {
+		records[i].CreatedAt = value
+	})
+}
+
+func backfillCreatedAt(anchor time.Time, length int, getCreatedAt func(int) string, getTime func(int) string, setCreatedAt func(int, string)) bool {
+	if length == 0 {
+		return false
+	}
+	currentDay := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.Local)
+	var newerTOD time.Duration
+	haveNewerTOD := false
+	mutated := false
+
+	for i := length - 1; i >= 0; i-- {
+		if ts, ok := parseRecordTimestamp(getCreatedAt(i)); ok {
+			currentDay = time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, time.Local)
+			newerTOD = time.Duration(ts.Hour())*time.Hour + time.Duration(ts.Minute())*time.Minute + time.Duration(ts.Second())*time.Second
+			haveNewerTOD = true
+			continue
+		}
+		tod, ok := parseClockTime(getTime(i))
+		if !ok {
+			continue
+		}
+		if haveNewerTOD && tod > newerTOD {
+			currentDay = currentDay.AddDate(0, 0, -1)
+		}
+		createdAt := currentDay.Add(tod).Format(time.RFC3339)
+		setCreatedAt(i, createdAt)
+		mutated = true
+		newerTOD = tod
+		haveNewerTOD = true
+	}
+
+	return mutated
+}
+
+func parseClockTime(value string) (time.Duration, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, false
+	}
+	parsed, err := time.ParseInLocation("15:04:05", trimmed, time.Local)
+	if err != nil {
+		return 0, false
+	}
+	return time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute + time.Duration(parsed.Second())*time.Second, true
+}
+
+func sanitizeLogs(logs []AppLog) []AppLog {
+	out := make([]AppLog, 0, len(logs))
+	for _, entry := range logs {
+		out = append(out, AppLog{
+			CreatedAt: entry.CreatedAt,
+			Time:      entry.Time,
+			Level:     entry.Level,
+			Message:   redactPlainText(entry.Message),
+		})
+	}
+	return out
+}
+
+func sanitizeRequests(requests []RequestRecord) []RequestRecord {
+	out := make([]RequestRecord, 0, len(requests))
+	for _, record := range requests {
+		out = append(out, RequestRecord{
+			CreatedAt:    record.CreatedAt,
+			Time:         record.Time,
+			Method:       record.Method,
+			Path:         record.Path,
+			Model:        record.Model,
+			StatusCode:   record.StatusCode,
+			Duration:     record.Duration,
+			Size:         record.Size,
+			InputTokens:  record.InputTokens,
+			OutputTokens: record.OutputTokens,
+			TotalTokens:  record.TotalTokens,
+			ReqBody:      redactAndLimitPayload(record.ReqBody),
+			RespBody:     redactAndLimitPayload(record.RespBody),
+		})
+	}
+	return out
+}
+
+func buildFeedbackManifest(options FeedbackExportOptions, startAt, endAt time.Time, logs []AppLog, requests []RequestRecord) map[string]any {
+	rangeLabel := strings.TrimSpace(options.RangePreset)
+	if rangeLabel == "" {
+		rangeLabel = feedbackDefaultRangePreset
+	}
+	manifest := map[string]any{
+		"appVersion":       desktopAppVersion,
+		"exportedAt":       time.Now().Format(time.RFC3339),
+		"rangePreset":      rangeLabel,
+		"appLogCount":      len(logs),
+		"requestCount":     len(requests),
+		"redacted":         true,
+		"requestBodyLimit": feedbackPayloadCharLimit,
+	}
+	if !startAt.IsZero() {
+		manifest["startAt"] = startAt.Format(time.RFC3339)
+		manifest["endAt"] = endAt.Format(time.RFC3339)
+	}
+	return manifest
+}
+
+func buildConfigSummary(cfg service.Config, stats TokenStats, status ProxyStatus) map[string]any {
+	summary := map[string]any{
+		"listenUrl":             fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port),
+		"backend":               string(cfg.Backend),
+		"transport":             string(cfg.Transport),
+		"remoteBaseURL":         strings.TrimSpace(cfg.RemoteBaseURL),
+		"remoteVersion":         strings.TrimSpace(cfg.RemoteVersion),
+		"cwd":                   cfg.Cwd,
+		"currentFilePath":       cfg.CurrentFilePath,
+		"mode":                  cfg.Mode,
+		"model":                 cfg.Model,
+		"shellType":             cfg.ShellType,
+		"sessionMode":           string(cfg.SessionMode),
+		"timeoutSeconds":        int(cfg.Timeout.Seconds()),
+		"remoteFallbackEnabled": cfg.RemoteFallbackEnabled,
+		"remoteFallbackModels":  cleanConfigStrings(cfg.RemoteFallbackModels),
+		"statusRunning":         status.Running,
+		"statusStartedAt":       status.StartedAt,
+		"tokenTotalRequests":    stats.TotalRequests,
+		"tokenSuccessRequests":  stats.SuccessRequests,
+		"tokenInputTokens":      stats.InputTokens,
+		"tokenOutputTokens":     stats.OutputTokens,
+		"tokenTotalTokens":      stats.TotalTokens,
+		"tokenLastModel":        stats.LastModel,
+		"tokenLastUpdated":      stats.LastUpdated,
+	}
+	if strings.TrimSpace(cfg.WebSocketURL) != "" {
+		summary["websocketUrl"] = cfg.WebSocketURL
+	}
+	if strings.TrimSpace(cfg.Pipe) != "" {
+		summary["pipe"] = cfg.Pipe
+	}
+	if strings.TrimSpace(cfg.RemoteAuthFile) != "" {
+		summary["remoteAuthFile"] = cfg.RemoteAuthFile
+	}
+	return summary
+}
+
+func buildEnvironmentSummary(cfg service.Config) map[string]any {
+	hostname, _ := os.Hostname()
+	return map[string]any{
+		"appName":         "Lingma Proxy",
+		"appVersion":      desktopAppVersion,
+		"os":              goruntime.GOOS,
+		"arch":            goruntime.GOARCH,
+		"backend":         string(cfg.Backend),
+		"model":           cfg.Model,
+		"timezone":        time.Now().Location().String(),
+		"exportLocalTime": time.Now().Format(time.RFC3339),
+		"hostnameMasked":  maskIdentifier(hostname),
+	}
+}
+
+func buildFeedbackShareText(options FeedbackExportOptions, cfg service.Config, status ProxyStatus, startAt, endAt time.Time, filename string) string {
+	lines := []string{
+		"反馈说明：",
+		strings.TrimSpace(options.IssueDescription),
+		"",
+		"应用版本：",
+		fmt.Sprintf("Lingma Proxy %s", desktopAppVersion),
+		"",
+		"系统环境：",
+		fmt.Sprintf("%s / %s", titleOS(goruntime.GOOS), goruntime.GOARCH),
+		fmt.Sprintf("backend: %s", status.Backend),
+		fmt.Sprintf("model: %s", cfg.Model),
+		"",
+		"日志范围：",
+		feedbackRangeLabel(options.RangePreset, startAt, endAt),
+		"",
+		"反馈包文件：",
+		filename,
+		"",
+		"说明：",
+		"反馈包默认已脱敏，不包含明文登录态缓存与完整无限长请求体。可将该压缩包提交到 GitHub Issue，或直接发送给维护者。",
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func feedbackRangeLabel(preset string, startAt, endAt time.Time) string {
+	switch strings.TrimSpace(preset) {
+	case "30m":
+		return "最近 30 分钟"
+	case "2h":
+		return "最近 2 小时"
+	case "24h":
+		return "最近 24 小时"
+	case "7d":
+		return "最近 7 天"
+	case "all":
+		return "全部"
+	case "custom":
+		return fmt.Sprintf("%s - %s", startAt.Format("2006/01/02 15:04"), endAt.Format("2006/01/02 15:04"))
+	default:
+		return "最近 30 分钟"
+	}
+}
+
+func titleOS(osName string) string {
+	switch osName {
+	case "darwin":
+		return "macOS"
+	case "windows":
+		return "Windows"
+	default:
+		return osName
+	}
+}
+
+func writeFeedbackZip(path string, entries []feedbackZipEntry) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := zip.NewWriter(file)
+	for _, entry := range entries {
+		w, err := writer.Create(entry.name)
+		if err != nil {
+			_ = writer.Close()
+			return err
+		}
+		if _, err := w.Write(entry.body); err != nil {
+			_ = writer.Close()
+			return err
+		}
+	}
+	return writer.Close()
+}
+
+func mustJSON(value any) []byte {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+func redactAndLimitPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if payload, ok := trySanitizeJSON(trimmed); ok {
+		return limitString(payload, feedbackPayloadCharLimit)
+	}
+	return limitString(redactPlainText(trimmed), feedbackPayloadCharLimit)
+}
+
+func trySanitizeJSON(raw string) (string, bool) {
+	var payload any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", false
+	}
+	sanitized := sanitizeValue("", payload)
+	data, err := json.MarshalIndent(sanitized, "", "  ")
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+func sanitizeValue(key string, value any) any {
+	if isSensitiveFieldName(key) {
+		return "[REDACTED]"
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for childKey, childValue := range typed {
+			out[childKey] = sanitizeValue(childKey, childValue)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, child := range typed {
+			out[index] = sanitizeValue(key, child)
+		}
+		return out
+	case string:
+		return sanitizeStringValue(key, typed)
+	default:
+		return value
+	}
+}
+
+func sanitizeStringValue(key, value string) string {
+	if isSensitiveFieldName(key) {
+		return "[REDACTED]"
+	}
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "data:image/") {
+		return "[REDACTED_IMAGE_DATA_URL]"
+	}
+	if looksLikeBase64Blob(trimmed) {
+		return "[REDACTED_BINARY_DATA]"
+	}
+	return limitString(redactPlainText(value), feedbackStringFieldLimit)
+}
+
+func isSensitiveFieldName(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(key, "-", "_")))
+	switch normalized {
+	case "authorization", "cookie", "set_cookie", "x_api_key", "api_key", "access_token", "refresh_token", "token", "password", "secret", "machine_id", "machineid", "user_id", "userid":
+		return true
+	default:
+		return strings.HasSuffix(normalized, "_token") || strings.HasSuffix(normalized, "_secret") || strings.HasSuffix(normalized, "_cookie")
+	}
+}
+
+var (
+	bearerPattern    = regexp.MustCompile(`(?i)(authorization["']?\s*[:=]\s*["']?bearer\s+)[^"'\s,}]+`)
+	tokenPairPattern = regexp.MustCompile(`(?i)\b(access_token|refresh_token|token|api_key|cookie|set-cookie|password|secret)\b["']?\s*[:=]\s*["']?([^"'\n\r,}]+)`)
+	machineIDPattern = regexp.MustCompile(`(?i)\b(machineid|machine_id|userid|user_id)\b["']?\s*[:=]\s*["']?([^"'\n\r,}]+)`)
+)
+
+func redactPlainText(value string) string {
+	result := value
+	result = bearerPattern.ReplaceAllString(result, "${1}[REDACTED]")
+	result = tokenPairPattern.ReplaceAllString(result, `$1="[REDACTED]"`)
+	result = machineIDPattern.ReplaceAllString(result, `$1="[REDACTED]"`)
+	result = strings.ReplaceAll(result, "\u0000", "")
+	return result
+}
+
+func looksLikeBase64Blob(value string) bool {
+	if len(value) < 2048 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' || r == '\n' || r == '\r' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func limitString(value string, limit int) string {
+	if limit <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + fmt.Sprintf("\n... [TRUNCATED %d chars]", len(runes)-limit)
 }
 
 func defaultConfig() service.Config {

@@ -11,7 +11,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['log', 'status', 'notice', 'open-settings', 'open-requests', 'open-models'])
+const emit = defineEmits(['log', 'status', 'notice', 'open-settings', 'open-requests', 'open-models', 'open-request-detail'])
 
 const status = ref(props.shellStatus)
 const models = ref([])
@@ -22,6 +22,7 @@ const config = ref({})
 const proxyLoading = ref(false)
 const modelsLoading = ref(false)
 const testing = ref(false)
+const activeHealthStat = ref('')
 const now = ref(Date.now())
 let interval = null
 let clockInterval = null
@@ -48,17 +49,23 @@ const parsedDurations = computed(() => requests.value.map((request) => parseDura
 const healthStats = computed(() => {
   const values = parsedDurations.value
   if (values.length === 0) {
-    return { avg: 0, p50: 0, p95: 0, max: 0 }
+    return { avg: '0', p50: '0', p95: '0', max: '0' }
   }
   const sorted = [...values].sort((a, b) => a - b)
   const avg = Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
   return {
-    avg,
-    p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    max: Math.round(sorted[sorted.length - 1])
+    avg: formatLatencyStat(avg),
+    p50: formatLatencyStat(percentile(sorted, 0.5)),
+    p95: formatLatencyStat(percentile(sorted, 0.95)),
+    max: formatLatencyStat(Math.round(sorted[sorted.length - 1]))
   }
 })
+const healthStatDescriptions = {
+  avg: '平均耗时：所有请求的平均值，容易被少量超慢请求拉高。',
+  p50: '中位耗时：一半请求比它更快，另一半更慢，更接近平时正常速度。',
+  p95: '95 分位耗时：95% 的请求都不会超过它，用来看是否偶发明显变慢。',
+  max: '最大耗时：这一批里最慢的一次，容易被单个异常请求拉高。'
+}
 const chartBars = computed(() => {
   const values = parsedDurations.value.slice(0, 36).reverse()
   if (values.length === 0) return []
@@ -87,6 +94,18 @@ function parseDurationMs(duration) {
   if (text.endsWith('ms')) return Math.round(Number.parseFloat(text))
   if (text.endsWith('s')) return Math.round(Number.parseFloat(text) * 1000)
   return Math.round(Number.parseFloat(text) || 0)
+}
+
+function formatLatencyStat(value) {
+  const number = Number(value || 0)
+  if (!Number.isFinite(number)) return '0'
+  if (number < 1000) return `${Math.round(number)} ms`
+  if (number < 60000) {
+    const seconds = number / 1000
+    return `${seconds >= 10 ? seconds.toFixed(1) : seconds.toFixed(2)} s`.replace(/\.00(?=\ss$)/, '').replace(/(\.\d)0(?=\ss$)/, '$1')
+  }
+  const minutes = number / 60000
+  return `${minutes >= 10 ? minutes.toFixed(1) : minutes.toFixed(2)} min`.replace(/\.00(?=\smin$)/, '').replace(/(\.\d)0(?=\smin$)/, '$1')
 }
 
 function percentile(sorted, p) {
@@ -210,6 +229,37 @@ function statusClass(code) {
   return 'warn'
 }
 
+function openRequestDetail(request) {
+  emit('open-request-detail', request.createdAt || request.time)
+}
+
+function formatDateTime(request) {
+  if (request.createdAt) {
+    try {
+      const date = new Date(request.createdAt)
+      const now = new Date()
+      const isToday = date.toDateString() === now.toDateString()
+      const yesterday = new Date(now)
+      yesterday.setDate(yesterday.getDate() - 1)
+      const isYesterday = date.toDateString() === yesterday.toDateString()
+
+      const timeStr = date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+      if (isToday) {
+        return `今天 ${timeStr}`
+      } else if (isYesterday) {
+        return `昨天 ${timeStr}`
+      } else {
+        const dateStr = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+        return `${dateStr} ${timeStr}`
+      }
+    } catch (e) {
+      return request.time || '-'
+    }
+  }
+  return request.time || '-'
+}
+
 onMounted(() => {
   refresh()
   interval = setInterval(refresh, 2500)
@@ -258,7 +308,7 @@ onUnmounted(() => {
         <div class="panel-header">
           <div>
             <h2>Health <span class="muted">(Last 60s)</span></h2>
-            <p>Latency (ms)</p>
+            <p>最近 60 秒请求延迟。P95 表示 95% 的请求会低于这个耗时。</p>
           </div>
           <span class="status-chip ok">Healthy</span>
         </div>
@@ -266,11 +316,22 @@ onUnmounted(() => {
           <span v-for="(height, index) in chartBars" :key="index" class="bar" :style="{ height: `${height}%`, opacity: 0.55 + index / 45 }"></span>
           <span v-if="chartBars.length === 0" class="chart-empty">暂无请求</span>
         </div>
-        <div class="health-stats">
-          <div><strong>{{ healthStats.avg }}</strong><span>Avg (ms)</span></div>
-          <div><strong>{{ healthStats.p50 }}</strong><span>P50 (ms)</span></div>
-          <div><strong>{{ healthStats.p95 }}</strong><span>P95 (ms)</span></div>
-          <div><strong style="color: #d97706">{{ healthStats.max }}</strong><span>Max (ms)</span></div>
+        <div v-if="activeHealthStat" class="health-explainer-float">
+          {{ healthStatDescriptions[activeHealthStat] }}
+        </div>
+        <div class="health-stats" @mouseleave="activeHealthStat = ''">
+          <div @mouseenter="activeHealthStat = 'avg'" @focusin="activeHealthStat = 'avg'" @focusout="activeHealthStat = ''">
+            <strong>{{ healthStats.avg }}</strong><span>Avg</span>
+          </div>
+          <div @mouseenter="activeHealthStat = 'p50'" @focusin="activeHealthStat = 'p50'" @focusout="activeHealthStat = ''">
+            <strong>{{ healthStats.p50 }}</strong><span>P50</span>
+          </div>
+          <div @mouseenter="activeHealthStat = 'p95'" @focusin="activeHealthStat = 'p95'" @focusout="activeHealthStat = ''">
+            <strong>{{ healthStats.p95 }}</strong><span>P95</span>
+          </div>
+          <div @mouseenter="activeHealthStat = 'max'" @focusin="activeHealthStat = 'max'" @focusout="activeHealthStat = ''">
+            <strong style="color: #d97706">{{ healthStats.max }}</strong><span>Max</span>
+          </div>
         </div>
       </div>
 
@@ -386,8 +447,8 @@ onUnmounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(request, index) in displayRequests" :key="index">
-                <td>{{ request.time }}</td>
+              <tr v-for="(request, index) in displayRequests" :key="index" class="clickable-row" @click="openRequestDetail(request)">
+                <td>{{ formatDateTime(request) }}</td>
                 <td>{{ request.method }}</td>
                 <td>{{ request.path }}</td>
                 <td>{{ request.model || '-' }}</td>
