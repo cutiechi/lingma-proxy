@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { GetLogDetail } from '../../wailsjs/go/main/App.js'
 import { ClipboardSetText } from '../../wailsjs/runtime'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { safeInvoke } from '../utils/wailsSafe'
 
 const props = defineProps({
   logs: {
@@ -17,6 +19,7 @@ const search = ref('')
 const selectedKey = ref(null)
 const selectedDetail = ref(null)
 const detailLoading = ref(false)
+const clearConfirmOpen = ref(false)
 
 const filteredLogs = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -90,10 +93,11 @@ async function loadDetail(createdAt) {
   }
   detailLoading.value = true
   try {
-    selectedDetail.value = await GetLogDetail(key)
-  } catch (e) {
-    console.debug('Wails GetLogDetail unavailable in browser preview')
-    selectedDetail.value = props.logs.find((log) => logKey(log) === key) || null
+    selectedDetail.value = await safeInvoke(
+      () => GetLogDetail(key),
+      () => props.logs.find((log) => logKey(log) === key) || null,
+      'GetLogDetail unavailable in browser preview'
+    )
   } finally {
     detailLoading.value = false
   }
@@ -109,6 +113,20 @@ async function selectLog(log) {
   }
   selectedKey.value = key
   await loadDetail(log.createdAt || '')
+}
+
+function confirmClearLogs() {
+  if (props.logs.length === 0) return
+  clearConfirmOpen.value = true
+}
+
+function cancelClearLogs() {
+  clearConfirmOpen.value = false
+}
+
+function proceedClearLogs() {
+  clearConfirmOpen.value = false
+  emit('clear')
 }
 
 watch(() => props.logs, (nextLogs) => {
@@ -129,7 +147,7 @@ watch(() => props.logs, (nextLogs) => {
       </div>
       <div class="toolbar">
         <button class="secondary-button" type="button" :disabled="filteredLogs.length === 0" @click="copyLogs">复制摘要</button>
-        <button class="danger-button" type="button" @click="emit('clear')">清空日志</button>
+        <button class="danger-button" type="button" :disabled="props.logs.length === 0" @click="confirmClearLogs">清空日志</button>
       </div>
     </div>
 
@@ -173,5 +191,14 @@ watch(() => props.logs, (nextLogs) => {
         </div>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="clearConfirmOpen"
+      title="确认清空日志"
+      message="当前日志列表会被立即清空，且无法恢复。"
+      confirm-label="确认清空"
+      @cancel="cancelClearLogs"
+      @confirm="proceedClearLogs"
+    />
   </div>
 </template>

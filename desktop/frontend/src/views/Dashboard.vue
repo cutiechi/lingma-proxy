@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { GetModels, GetConfig, GetRequestSummaries, GetStatus, GetTokenStats, QuitApp, RefreshModels, StartProxy, StopProxy } from '../../wailsjs/go/main/App.js'
+import { GetModels, GetConfig, GetRequestSummaries, GetStatus, GetTokenStats, RefreshModels, StartProxy, StopProxy } from '../../wailsjs/go/main/App.js'
 import { ClipboardSetText } from '../../wailsjs/runtime'
 import { modelIcon } from '../modelIcons'
 
@@ -17,11 +17,9 @@ const status = ref(props.shellStatus)
 const models = ref([])
 const requests = ref([])
 const tokenStats = ref({ totalRequests: 0, successRequests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 })
-const health = ref(null)
 const config = ref({})
 const proxyLoading = ref(false)
 const modelsLoading = ref(false)
-const testing = ref(false)
 const activeHealthStat = ref('')
 const now = ref(Date.now())
 let interval = null
@@ -30,12 +28,11 @@ let fastRefreshTick = 0
 
 const endpoint = computed(() => (status.value.addr ? `http://${status.value.addr}` : '未启动'))
 const isRunning = computed(() => Boolean(status.value.running))
-const isRemoteBackend = computed(() => status.value.backend === 'remote' || config.value.Backend === 'remote' || health.value?.state?.transport === 'remote')
 const transportLabel = computed(() => {
-  if (isRemoteBackend.value) return 'Remote API'
-  return health.value?.state?.transport || config.value.Transport || 'auto'
+  if (status.value.backend === 'remote' || config.value.Backend === 'remote') return 'Remote API'
+  return config.value.Transport || 'auto'
 })
-const sessionLabel = computed(() => health.value?.state?.session_mode || config.value.SessionMode || 'auto')
+const sessionLabel = computed(() => config.value.SessionMode || 'auto')
 const runningDuration = computed(() => {
   if (!isRunning.value || !status.value.startedAt) return '未运行'
   const startedAt = new Date(status.value.startedAt).getTime()
@@ -198,31 +195,6 @@ async function restartProxy() {
     emit('log', 'error', '代理重启失败：' + (e.message || String(e)))
   } finally {
     proxyLoading.value = false
-  }
-}
-
-async function testConnection() {
-  if (!isRunning.value || !status.value.addr) {
-    emit('log', 'warn', '代理未运行，无法测试连接')
-    return
-  }
-  testing.value = true
-  try {
-    const resp = await fetch(`${endpoint.value}/health`)
-    const data = await resp.json()
-    health.value = data
-    emit('log', data.ok ? 'info' : 'warn', data.ok ? '健康检查通过' : '健康检查返回异常')
-  } catch (e) {
-    health.value = { ok: false, error: e.message || String(e) }
-    emit('log', 'error', '健康检查失败：' + (e.message || String(e)))
-  } finally {
-    testing.value = false
-  }
-}
-
-async function quitApp() {
-  if (confirm('确定退出应用？代理服务会一起停止。')) {
-    await QuitApp()
   }
 }
 

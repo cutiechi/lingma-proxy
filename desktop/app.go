@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,6 @@ import (
 )
 
 const (
-	desktopAppVersion          = "1.5.2"
 	feedbackPayloadCharLimit   = 16000
 	feedbackStringFieldLimit   = 4096
 	feedbackDefaultRangePreset = "30m"
@@ -40,6 +40,27 @@ const (
 	appStatePersistBodyLimit   = 12000
 	listSummaryMessageLimit    = 240
 )
+
+//go:embed wails.json
+var wailsConfigJSON []byte
+
+var desktopAppVersion = resolveDesktopAppVersion()
+
+type wailsConfig struct {
+	Info struct {
+		ProductVersion string `json:"productVersion"`
+	} `json:"info"`
+}
+
+func resolveDesktopAppVersion() string {
+	var cfg wailsConfig
+	if err := json.Unmarshal(wailsConfigJSON, &cfg); err == nil {
+		if version := strings.TrimSpace(cfg.Info.ProductVersion); version != "" {
+			return version
+		}
+	}
+	return "dev"
+}
 
 // App struct
 // RequestRecord stores a single HTTP request summary
@@ -249,31 +270,19 @@ func (a *App) beginQuit() {
 }
 
 // QuitApp fully quits the application
-func (a *App) QuitApp() {
-	a.beginQuit()
-}
-
 // ForceQuitApp stops the proxy and exits the desktop process immediately.
 func (a *App) ForceQuitApp() {
 	a.beginQuit()
 }
 
+func (a *App) GetAppVersion() string {
+	return desktopAppVersion
+}
+
 // RequestQuitShortcut requires two shortcut presses to avoid accidental exits.
 func (a *App) RequestQuitShortcut() {
-	now := time.Now()
-	a.mu.Lock()
-	shouldQuit := !a.quitHint.IsZero() && now.Sub(a.quitHint) <= 2*time.Second
-	a.quitHint = now
-	a.mu.Unlock()
-
-	if shouldQuit {
-		go a.forceQuit()
-		return
-	}
-
-	message := "再按一次退出快捷键将停止代理并退出应用"
-	a.emitLog("warn", message)
-	runtime.EventsEmit(a.ctx, "quit:confirm", message)
+	a.ShowWindow()
+	runtime.EventsEmit(a.ctx, "app:confirm-force-quit")
 }
 
 func (a *App) forceQuit() {
@@ -574,17 +583,6 @@ func (a *App) StartProxy() error {
 	return nil
 }
 
-func (a *App) GetLogs() []AppLog {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	out := make([]AppLog, len(a.logs))
-	copy(out, a.logs)
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
-}
-
 // GetLogSummaries returns recent logs with truncated messages for lightweight list rendering.
 func (a *App) GetLogSummaries() []AppLog {
 	a.mu.RLock()
@@ -796,19 +794,6 @@ func (a *App) GetModels() []ModelInfo {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.models
-}
-
-// GetRequests returns recent HTTP request records
-func (a *App) GetRequests() []RequestRecord {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	out := make([]RequestRecord, len(a.requests))
-	copy(out, a.requests)
-	// reverse so newest first
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
 }
 
 // GetRequestSummaries returns recent request records without large request/response bodies.

@@ -29,6 +29,7 @@ type Server struct {
 	sem     chan struct{}
 	recMu   sync.RWMutex
 	records []debugRequestRecord
+	logs    []debugLogRecord
 	// OnRequest is called after each request completes with summary info.
 	// method, path, statusCode, duration, requestBody, responseBody
 	OnRequest func(method, path string, statusCode int, duration time.Duration, reqBody, respBody string)
@@ -115,6 +116,12 @@ type debugRequestRecord struct {
 	Response   string `json:"response,omitempty"`
 }
 
+type debugLogRecord struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Message string `json:"message"`
+}
+
 func NewServer(addr string, svc *service.Service) *Server {
 	s := &Server{
 		svc: svc,
@@ -124,9 +131,11 @@ func NewServer(addr string, svc *service.Service) *Server {
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/health", s.handleRoot)
 	mux.HandleFunc("/debug/requests", s.handleDebugRequests)
-	mux.HandleFunc("/debug/logs", s.handleDebugRequests)
+	mux.HandleFunc("/debug/access-logs", s.handleDebugLogs)
 	mux.HandleFunc("/api/requests", s.handleDebugRequests)
-	mux.HandleFunc("/api/logs", s.handleDebugRequests)
+	mux.HandleFunc("/api/access-logs", s.handleDebugLogs)
+	mux.HandleFunc("/debug/logs", s.handleDebugLogs)
+	mux.HandleFunc("/api/logs", s.handleDebugLogs)
 	mux.HandleFunc("/capabilities", s.handleCapabilities)
 	mux.HandleFunc("/v1/capabilities", s.handleCapabilities)
 	mux.HandleFunc("/v1/models", s.handleModels)
@@ -239,6 +248,45 @@ func (s *Server) handleDebugRequests(w http.ResponseWriter, r *http.Request) {
 		"count":    len(records),
 		"requests": records,
 		"state":    s.svc.State(),
+	})
+}
+
+func (s *Server) handleDebugLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "invalid_request_error", "method not allowed")
+		return
+	}
+
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			switch {
+			case parsed < 1:
+				limit = 1
+			case parsed > 200:
+				limit = 200
+			default:
+				limit = parsed
+			}
+		}
+	}
+
+	logs := s.debugLogs(limit)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"service": "lingma-proxy",
+		"kind":    "http_access_logs",
+		"count":   len(logs),
+		"logs":    logs,
+		"state":   s.svc.State(),
 	})
 }
 
@@ -2598,7 +2646,7 @@ func (s *Server) withRecorder(next http.Handler) http.Handler {
 
 func isDebugInspectionPath(path string) bool {
 	switch path {
-	case "/debug/requests", "/debug/logs", "/api/requests", "/api/logs":
+	case "/debug/requests", "/debug/logs", "/api/requests", "/api/logs", "/debug/access-logs", "/api/access-logs":
 		return true
 	default:
 		return false
@@ -2621,6 +2669,14 @@ func (s *Server) recordRequest(method, path string, statusCode int, duration tim
 	if len(s.records) > 200 {
 		s.records = s.records[len(s.records)-200:]
 	}
+	s.logs = append(s.logs, debugLogRecord{
+		Time:    time.Now().Format(time.RFC3339),
+		Level:   debugLogLevel(statusCode),
+		Message: fmt.Sprintf("%s %s -> %d (%dms)", method, path, statusCode, duration.Milliseconds()),
+	})
+	if len(s.logs) > 200 {
+		s.logs = s.logs[len(s.logs)-200:]
+	}
 }
 
 func (s *Server) debugRecords(limit int) []debugRequestRecord {
@@ -2635,6 +2691,31 @@ func (s *Server) debugRecords(limit int) []debugRequestRecord {
 		out = append(out, s.records[i])
 	}
 	return out
+}
+
+func (s *Server) debugLogs(limit int) []debugLogRecord {
+	s.recMu.RLock()
+	defer s.recMu.RUnlock()
+
+	if limit > len(s.logs) {
+		limit = len(s.logs)
+	}
+	out := make([]debugLogRecord, 0, limit)
+	for i := len(s.logs) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, s.logs[i])
+	}
+	return out
+}
+
+func debugLogLevel(statusCode int) string {
+	switch {
+	case statusCode >= 500:
+		return "error"
+	case statusCode >= 400:
+		return "warn"
+	default:
+		return "info"
+	}
 }
 
 func sanitizeRecordedBody(body []byte) string {

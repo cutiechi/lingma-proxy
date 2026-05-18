@@ -1,19 +1,27 @@
 # Changelog
 
-## Unreleased
+## Unreleased (target: v1.5.3)
 
-- Tightened desktop-side request/log rendering to keep only summaries in hot UI state and load full request or log bodies on demand.
-- Reduced dashboard refresh pressure further by polling lightweight request summaries instead of full request payloads.
-- Added in-panel `Cmd/Ctrl+F` search for desktop request/response detail viewers, including scoped search boxes, highlighted matches, and next/previous navigation inside the active content pane.
-- Fixed desktop request-stream selection edge cases: same-second requests now use stable UUIDs, Dashboard-to-Requests first-click jump no longer loses selection, and request rows keep a stable “has body / no body” summary to avoid layout jitter.
-- Corrected desktop and README model metadata copy: `Qwen3-Coder` now uses a conservative `256k` label, while `Qwen3.6-Plus` and `Qwen3-Thinking` are documented as `1M` and `Qwen3-Max` as `256k` based on the latest verified Bailian-side metadata.
-- Bumped the local desktop validation line to `1.5.2`.
+## v1.5.3 - 2026-05-18
+
+- Tightened desktop request/log rendering so list views keep only lightweight summaries in hot UI state and load full request or log bodies on demand.
+- Added scoped `Cmd/Ctrl+F` search inside desktop request/response detail panes, with match counts, highlighted results, and next/previous navigation inside the active panel.
+- Fixed desktop request-stream selection edge cases: same-second requests now use stable UUIDs, Dashboard-to-Requests first-click jump no longer loses selection, and request rows keep a stable summary layout.
+- Replaced fragile native `window.confirm` usage with a shared in-app confirmation dialog for destructive actions and unified the quit-confirm flow between the title-bar power button and the menu `Cmd/Ctrl+Q` path.
+- Split debug inspection endpoints so `/debug/requests` returns request inspection records and `/debug/access-logs` returns HTTP access-log summaries; `/debug/logs` and `/api/logs` remain compatibility aliases with explicit access-log semantics.
+- Moved the desktop app version to a single repository source via [VERSION](./VERSION), added `scripts/sync-version.sh` and `scripts/check-version-sync.sh`, and added CI drift detection for versioned release-facing files.
+- Removed stale desktop dashboard state/quit branches that were no longer wired into the UI, reducing dead logic around health probes and legacy quit confirmation.
+- Corrected desktop and README model metadata copy: `Qwen3-Coder` now uses a conservative `256k` label, while `Qwen3.6-Plus` and `Qwen3-Thinking` are documented as `1M` and `Qwen3-Max` as `256k`.
+- Rebuilt and validated the packaged desktop line as `1.5.3`.
 - 请求流和日志页进一步收紧为“摘要列表 + 详情按需加载”，避免前端热路径长期持有完整正文。
-- 仪表盘继续降载，轮询时优先拉取轻量请求摘要而不是完整请求体。
 - 请求内容 / 响应内容区域新增 `Cmd/Ctrl+F` 局部搜索，支持右上角搜索框、命中高亮、上下跳转，并且只作用于当前激活的内容面板。
-- 修复请求流选中与跳转细节：同秒请求改用 UUID 防止多条同时高亮；首页最近请求首次跳转到请求流时不再丢失选中；列表稳定保留“包含请求体 / 无请求体”摘要，避免点击后行高抖动。
+- 修复请求流选中与跳转细节：同秒请求改用 UUID 防止多条同时高亮；首页最近请求首次跳转到请求流时不再丢失选中；列表稳定保留摘要布局，避免点击后行高抖动。
+- 把原生 `window.confirm` 替换为统一的应用内确认弹层，请求流清空、日志清空以及顶部电源按钮/菜单 `Cmd+Q` 现在都走同一套确认交互。
+- 拆分调试接口语义：`/debug/requests` 只返回请求检查记录，`/debug/access-logs` 返回 HTTP 访问日志摘要；`/debug/logs` 和 `/api/logs` 保留为兼容别名，但语义已经明确为 access log。
+- 版本号改为仓库单一来源：新增根级 [VERSION](./VERSION)、`scripts/sync-version.sh`、`scripts/check-version-sync.sh`，并增加 CI 漂移校验，避免 `wails.json`、README、CHANGELOG 再各自手工维护。
+- 清理桌面端 Dashboard 中未接线的 health / quit 旧状态机和方法，减少后续在旧分支上再踩回归的概率。
 - 修正文案：模型上下文单位统一为 `256k / 1M` 口径，`Qwen3-Coder` 为保守的 `256k`，`Qwen3.6-Plus`、`Qwen3-Thinking` 为 `1M`，`Qwen3-Max` 为 `256k`。
-- 本地桌面端候选版本线提升到 `1.5.2`。
+- 桌面端正式版本线提升到 `1.5.3` 并完成本地重建验证。
 
 ## v1.5.1 - 2026-05-15
 

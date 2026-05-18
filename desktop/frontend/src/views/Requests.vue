@@ -1,8 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ClearRequests, GetRequestDetail, GetRequestSummaries } from '../../wailsjs/go/main/App.js'
-import { ClipboardSetText, EventsOff, EventsOn } from '../../wailsjs/runtime'
+import { ClipboardSetText } from '../../wailsjs/runtime'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import JsonViewer from '../components/JsonViewer.vue'
+import { safeEventsOff, safeEventsOn, safeInvoke } from '../utils/wailsSafe'
 
 const props = defineProps({
   selectedRequestId: {
@@ -28,6 +30,7 @@ const loading = ref(requests.value.length === 0)
 const activeDetailPane = ref('request')
 const requestViewerRef = ref(null)
 const responseViewerRef = ref(null)
+const clearConfirmOpen = ref(false)
 let refreshTimer = null
 
 function requestKey(request) {
@@ -53,27 +56,36 @@ async function refresh() {
     loading.value = true
   }
   try {
-    requests.value = await GetRequestSummaries()
+    const items = await safeInvoke(() => GetRequestSummaries(), requests.value, 'GetRequestSummaries unavailable in browser preview')
+    requests.value = Array.isArray(items) ? items : requests.value
     if (pendingSelectId.value) {
       selectRequestById(pendingSelectId.value)
       pendingSelectId.value = null
     }
-  } catch (e) {
-    console.debug('Wails GetRequestSummaries unavailable in browser preview')
   } finally {
     loading.value = false
   }
 }
 
 async function clear() {
-  try {
-    await ClearRequests()
-  } catch (e) {
-    console.debug('Wails ClearRequests unavailable in browser preview')
-  }
+  await safeInvoke(() => ClearRequests(), undefined, 'ClearRequests unavailable in browser preview')
   requests.value = []
   selectedKey.value = null
   selectedDetail.value = null
+}
+
+async function confirmClear() {
+  if (requests.value.length === 0) return
+  clearConfirmOpen.value = true
+}
+
+function cancelClear() {
+  clearConfirmOpen.value = false
+}
+
+async function proceedClear() {
+  clearConfirmOpen.value = false
+  await clear()
 }
 
 function statusClass(code) {
@@ -90,10 +102,11 @@ async function loadDetail(requestId) {
   }
   detailLoading.value = true
   try {
-    selectedDetail.value = await GetRequestDetail(key)
-  } catch (e) {
-    console.debug('Wails GetRequestDetail unavailable in browser preview')
-    selectedDetail.value = requests.value.find((item) => requestKey(item) === key) || null
+    selectedDetail.value = await safeInvoke(
+      () => GetRequestDetail(key),
+      () => requests.value.find((item) => requestKey(item) === key) || null,
+      'GetRequestDetail unavailable in browser preview'
+    )
   } finally {
     detailLoading.value = false
   }
@@ -165,22 +178,6 @@ async function copyText(text, label) {
   } catch (e) {
     console.debug('Copy failed:', e)
     emit('notice', `${label}复制失败`)
-  }
-}
-
-function safeEventsOn(name, handler) {
-  try {
-    EventsOn(name, handler)
-  } catch (e) {
-    console.debug('Wails runtime event unavailable:', name)
-  }
-}
-
-function safeEventsOff(name) {
-  try {
-    EventsOff(name)
-  } catch (e) {
-    console.debug('Wails runtime event unavailable:', name)
   }
 }
 
@@ -262,7 +259,7 @@ onUnmounted(() => {
       </div>
       <div class="toolbar">
         <button class="secondary-button" type="button" @click="refresh">刷新</button>
-        <button class="danger-button" type="button" @click="clear">清空</button>
+        <button class="danger-button" type="button" :disabled="requests.length === 0" @click="confirmClear">清空</button>
       </div>
     </div>
 
@@ -353,5 +350,14 @@ onUnmounted(() => {
         </template>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="clearConfirmOpen"
+      title="确认清空请求记录"
+      message="当前请求流列表会被立即清空，且无法恢复。"
+      confirm-label="确认清空"
+      @cancel="cancelClear"
+      @confirm="proceedClear"
+    />
   </div>
 </template>

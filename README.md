@@ -28,7 +28,11 @@ The proxy now supports two backend modes:
 
 ## Current Version
 
-The current desktop line is `v1.5.2`.
+<!-- VERSION:CURRENT:BEGIN -->
+Current desktop app version: `v1.5.3`.
+
+The canonical source is [VERSION](./VERSION). Run `./scripts/sync-version.sh` to propagate it into [desktop/wails.json](./desktop/wails.json), the desktop UI, and release-facing docs.
+<!-- VERSION:CURRENT:END -->
 
 See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
@@ -90,8 +94,9 @@ Narrow window layout:
 | Health | `GET /`, `HEAD /`, `GET /health`, `HEAD /health` | supported |
 | Models | `GET /v1/models` | supported |
 | Capability Discovery | `GET /capabilities`, `GET /v1/capabilities` | supported |
-| Debug Requests | `GET /debug/requests`, `GET /debug/logs` | recent HTTP request history |
-| Debug Aliases | `GET /api/requests`, `GET /api/logs` | aliases for request/log inspection |
+| Debug Requests | `GET /debug/requests` | recent HTTP request inspection records |
+| Debug Logs | `GET /debug/access-logs`, `GET /debug/logs` | recent HTTP access log lines (`/debug/logs` kept as compatibility alias) |
+| Debug Aliases | `GET /api/requests`, `GET /api/access-logs`, `GET /api/logs` | aliases for request / access-log inspection |
 | LM Studio / Ollama Discovery | `GET /api/v1/models`, `GET /api/tags`, `GET /props` | supported |
 | OpenAI Chat Completions | `POST /v1/chat/completions` | streaming and non-streaming |
 | OpenAI Chat Alias | `POST /api/v1/chat/completions` | supported |
@@ -373,7 +378,7 @@ These examples are based on clients we have actually validated against Lingma Pr
 | **Claude Code** | ✅ Fully Tested | Text chat, tool use, image input, image + tools | Anthropic API compatible |
 | **Hermes Agent** | ✅ Fully Tested | Text chat, tool-enabled coding, `--image` flag | OpenAI API compatible |
 | **CodeBuddy** | ✅ Fully Tested | Standard chat, token usage accounting | OpenAI-compatible custom model |
-| **Codex CLI** | ✅ Fully Tested | Plain text execution, multi-step tool use, file edits + diff, image input, image + tool follow-up | Requires `/v1/responses` endpoint, `wire_api = "responses"`, validated against desktop app `v1.5.2`, retry recovery also verified |
+| **Codex CLI** | ✅ Fully Tested | Plain text execution, multi-step tool use, file edits + diff, image input, image + tool follow-up | Requires `/v1/responses` endpoint, `wire_api = "responses"`, validated against the current desktop app line defined in `desktop/wails.json`, retry recovery also verified |
 
 ### Claude Code
 
@@ -703,10 +708,12 @@ Useful endpoints:
 curl http://127.0.0.1:8095/health
 curl -I http://127.0.0.1:8095/
 curl 'http://127.0.0.1:8095/debug/requests?limit=20'
-curl 'http://127.0.0.1:8095/debug/logs?limit=20'
+curl 'http://127.0.0.1:8095/debug/access-logs?limit=20'
 ```
 
-`/debug/requests` and `/debug/logs` return the newest records first. Each record includes:
+`/debug/requests` and `/debug/access-logs` return the newest records first.
+
+`/debug/requests` records include:
 
 - request time
 - HTTP method and path
@@ -714,6 +721,14 @@ curl 'http://127.0.0.1:8095/debug/logs?limit=20'
 - duration in milliseconds
 - sanitized request body
 - sanitized response body
+
+`/debug/access-logs` records include:
+
+- event time
+- level
+- summarized HTTP access log message
+
+Prefer `/debug/access-logs` and `/api/access-logs` in new tooling. `/debug/logs` and `/api/logs` are retained as backward-compatible aliases for the same HTTP access log feed.
 
 The server keeps the most recent 200 HTTP records in memory. Image payloads and large base64 strings are redacted before recording, and very large bodies are truncated to keep the desktop UI responsive.
 
@@ -780,23 +795,31 @@ The GitHub release workflow is triggered by:
 
 Recommended remote release checklist:
 
-1. make sure `README.md`, `README.zh-CN.md`, and `CHANGELOG.md` are up to date
-2. confirm the local desktop verification build has passed
-3. create and push the release tag
-4. wait for GitHub Actions to build CLI + desktop assets
-5. verify the DMG / ZIP / Windows packages and SHA256 file in the Release page
+1. update [VERSION](./VERSION)
+2. run `./scripts/sync-version.sh`
+3. run `./scripts/check-version-sync.sh`
+4. make sure `README.md`, `README.zh-CN.md`, and `CHANGELOG.md` contain the expected release notes content
+5. confirm the local desktop verification build has passed
+6. create and push the release tag from `VERSION`
+   `VERSION=$(cat VERSION)`
+   `git tag "v$VERSION" && git push origin "v$VERSION"`
+7. wait for GitHub Actions to build CLI + desktop assets
+8. verify the DMG / ZIP / Windows packages and SHA256 file in the Release page
+
+Version maintenance is script-driven, but release publication is still a manual action: you choose when to update `VERSION`, when to push the tag, and when to run the GitHub `Release` workflow manually.
 
 If you need a temporary packaging tag without changing the app's internal version line, use a suffix tag such as `v1.4.15-fix1`. The GitHub workflow will still package the latest code because the workflow matches `v*`.
 
-### Suggested release summary for v1.5.2
+### Suggested release summary template
 
-Use the following as the GitHub Release body draft:
+Use the following as the GitHub Release body draft for `v1.5.3`:
 
-- Added stable OpenAI Responses API compatibility for Codex CLI (`/v1/responses`, `/api/v1/responses`).
-- Fixed Codex multi-step tool workflows so project-structure reading, command execution, file edits, and unified diff output complete through Lingma Proxy instead of failing with repeated `502` retries.
-- Fixed Remote API image-context fallback so image-bearing requests can continue into tool-enabled turns after IPC image extraction.
-- Verified the desktop app `v1.5.2` against Brew-installed `codex-cli 0.130.0`, including plain text, multi-step tools, file edit + diff, image input, image + tool follow-up, and retry recovery after desktop app restart.
-- Kept Remote API as the default recommended backend while retaining IPC plugin mode as a compatibility fallback.
+- Tightened the desktop Requests / Logs views into summary-first lists with on-demand detail loading, reducing hot-path memory pressure during long-running inspections.
+- Added scoped `Cmd/Ctrl+F` search inside request and response detail panes, including match counting, highlighting, and next / previous navigation.
+- Fixed same-second request selection by switching desktop record identity to stable UUIDs, so Dashboard-to-Requests jumps and row highlighting stay accurate.
+- Replaced fragile native confirm dialogs with a shared in-app confirmation modal for clearing Requests / Logs and for the unified desktop quit-confirm flow.
+- Split debug inspection semantics: `/debug/requests` now returns request inspection records, while `/debug/access-logs` returns HTTP access-log summaries; `/debug/logs` remains a compatibility alias.
+- Moved the desktop app version to the repository-wide `VERSION` source and added sync / drift-check scripts plus CI enforcement for release-facing versioned files.
 
 ## Star History
 

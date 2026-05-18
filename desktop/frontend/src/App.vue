@@ -5,19 +5,23 @@ import Logs from './views/Logs.vue'
 import Models from './views/Models.vue'
 import Requests from './views/Requests.vue'
 import Settings from './views/Settings.vue'
-import { ClipboardSetText, EventsOff, EventsOn } from '../wailsjs/runtime'
-import { ChooseFeedbackExportPath, ClearLogs, ExportFeedbackBundle, ForceQuitApp, GetLogSummaries, GetRequestSummaries, GetStatus, HideWindow, MinimizeWindow, OpenPathInFileManager } from '../wailsjs/go/main/App.js'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+import { ClipboardSetText } from '../wailsjs/runtime'
+import { ChooseFeedbackExportPath, ClearLogs, ExportFeedbackBundle, ForceQuitApp, GetAppVersion, GetLogSummaries, GetRequestSummaries, GetStatus, HideWindow, MinimizeWindow, OpenPathInFileManager } from '../wailsjs/go/main/App.js'
 import lingmaIcon from './assets/images/lingma-icon.png'
+import { safeEventsOff, safeEventsOn, safeInvoke } from './utils/wailsSafe'
 
 const currentTab = ref('dashboard')
 const selectedRequestId = ref(null)
 const requestSnapshot = ref([])
 const logs = ref([])
 const status = ref({ running: false, addr: '', models: 0 })
+const appVersion = ref('dev')
 const toast = ref('')
 const themeMode = ref(localStorage.getItem('lingma-theme-mode') || 'system')
 const appliedTheme = ref('light')
 const forceQuitting = ref(false)
+const forceQuitConfirmOpen = ref(false)
 const feedbackOpen = ref(false)
 const feedbackStep = ref('form')
 const feedbackBusy = ref(false)
@@ -71,12 +75,8 @@ function showToast(message) {
 }
 
 async function clearLocalLogs() {
-  try {
-    await ClearLogs()
-    logs.value = []
-  } catch (e) {
-    logs.value = []
-  }
+  await safeInvoke(() => ClearLogs(), undefined, 'ClearLogs unavailable in app shell')
+  logs.value = []
 }
 
 function setStatus(nextStatus) {
@@ -136,12 +136,8 @@ async function refreshStatus() {
 }
 
 async function primeRequests() {
-  try {
-    const items = await GetRequestSummaries()
-    requestSnapshot.value = Array.isArray(items) ? items : []
-  } catch (e) {
-    console.debug('Wails GetRequests unavailable in app shell')
-  }
+  const items = await safeInvoke(() => GetRequestSummaries(), [], 'GetRequestSummaries unavailable in app shell')
+  requestSnapshot.value = Array.isArray(items) ? items : []
 }
 
 function scheduleRequestSnapshotRefresh() {
@@ -163,6 +159,7 @@ async function copyEndpoint() {
 async function forceQuitApp() {
   if (forceQuitting.value) return
   forceQuitting.value = true
+  forceQuitConfirmOpen.value = false
   showToast('正在停止代理并退出应用...')
   try {
     await ForceQuitApp()
@@ -170,6 +167,15 @@ async function forceQuitApp() {
     forceQuitting.value = false
     addLog('error', '退出应用失败：' + (e.message || String(e)))
   }
+}
+
+function confirmForceQuit() {
+  if (forceQuitting.value) return
+  forceQuitConfirmOpen.value = true
+}
+
+function cancelForceQuit() {
+  forceQuitConfirmOpen.value = false
 }
 
 function openFeedbackDialog() {
@@ -237,22 +243,6 @@ async function copyValue(value, label) {
   }
 }
 
-function safeEventsOn(name, handler) {
-  try {
-    EventsOn(name, handler)
-  } catch (e) {
-    console.debug('Wails runtime event unavailable:', name)
-  }
-}
-
-function safeEventsOff(name) {
-  try {
-    EventsOff(name)
-  } catch (e) {
-    console.debug('Wails runtime event unavailable:', name)
-  }
-}
-
 function handleAppShortcut(event) {
   const key = event.key.toLowerCase()
   if ((event.metaKey || event.ctrlKey) && key === 'w') {
@@ -295,6 +285,9 @@ onMounted(() => {
   systemThemeQuery?.addEventListener?.('change', applyTheme)
   applyTheme()
   refreshStatus()
+  safeInvoke(() => GetAppVersion(), 'dev', 'GetAppVersion unavailable in app shell').then((value) => {
+    if (value) appVersion.value = value
+  })
   primeRequests()
   GetLogSummaries().then((items) => {
     logs.value = Array.isArray(items) ? items : []
@@ -317,6 +310,9 @@ onMounted(() => {
   safeEventsOn('quit:confirm', (message) => {
     showToast(message || '再按一次退出快捷键将停止代理并退出应用')
   })
+  safeEventsOn('app:confirm-force-quit', () => {
+    confirmForceQuit()
+  })
   safeEventsOn('status:updated', (nextStatus) => {
     status.value = nextStatus
   })
@@ -334,6 +330,7 @@ onUnmounted(() => {
   safeEventsOff('log')
   safeEventsOff('logs:updated')
   safeEventsOff('quit:confirm')
+  safeEventsOff('app:confirm-force-quit')
   safeEventsOff('status:updated')
   safeEventsOff('requests:updated')
 })
@@ -372,7 +369,7 @@ onUnmounted(() => {
         <span class="status-dot" :class="{ running: status.running }"></span>
         <div>
           <strong>{{ status.running ? 'Proxy Running' : 'Proxy Stopped' }}</strong>
-          <small>v1.5.2</small>
+          <small>v{{ appVersion }}</small>
         </div>
       </div>
     </aside>
@@ -396,7 +393,7 @@ onUnmounted(() => {
           <button class="icon-button" type="button" :title="themeTitle()" @click="toggleTheme">
             <i class="bi" :class="themeIcon()" aria-hidden="true"></i>
           </button>
-          <button class="icon-button danger-icon-button" type="button" title="停止代理并退出应用" :disabled="forceQuitting" @click="forceQuitApp">
+          <button class="icon-button danger-icon-button" type="button" title="停止代理并退出应用" :disabled="forceQuitting" @click="confirmForceQuit">
             <i class="bi bi-power" aria-hidden="true"></i>
           </button>
         </div>
@@ -547,5 +544,13 @@ onUnmounted(() => {
         </div>
       </section>
     </div>
+    <ConfirmDialog
+      :open="forceQuitConfirmOpen"
+      title="确认退出应用"
+      message="这会先停止代理，再退出 Lingma Proxy。"
+      confirm-label="停止并退出"
+      @cancel="cancelForceQuit"
+      @confirm="forceQuitApp"
+    />
   </div>
 </template>

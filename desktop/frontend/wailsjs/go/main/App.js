@@ -22,6 +22,10 @@ export function ForceQuitApp() {
   return window['go']['main']['App']['ForceQuitApp']();
 }
 
+export function GetAppVersion() {
+  return window['go']['main']['App']['GetAppVersion']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -38,10 +42,6 @@ export function GetLogSummaries() {
   return window['go']['main']['App']['GetLogSummaries']();
 }
 
-export function GetLogs() {
-  return window['go']['main']['App']['GetLogs']();
-}
-
 export function GetModels() {
   return window['go']['main']['App']['GetModels']();
 }
@@ -52,10 +52,6 @@ export function GetRequestDetail(arg1) {
 
 export function GetRequestSummaries() {
   return window['go']['main']['App']['GetRequestSummaries']();
-}
-
-export function GetRequests() {
-  return window['go']['main']['App']['GetRequests']();
 }
 
 export function GetStatus() {
@@ -76,10 +72,6 @@ export function MinimizeWindow() {
 
 export function OpenPathInFileManager(arg1) {
   return window['go']['main']['App']['OpenPathInFileManager'](arg1);
-}
-
-export function QuitApp() {
-  return window['go']['main']['App']['QuitApp']();
 }
 
 export function RefreshModels() {

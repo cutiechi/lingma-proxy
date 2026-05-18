@@ -13,6 +13,8 @@ export function ExportFeedbackBundle(arg1:main.FeedbackExportOptions):Promise<ma
 
 export function ForceQuitApp():Promise<void>;
 
+export function GetAppVersion():Promise<string>;
+
 export function GetConfig():Promise<service.Config>;
 
 export function GetDetectionInfo():Promise<main.DetectionInfo>;
@@ -21,15 +23,11 @@ export function GetLogDetail(arg1:string):Promise<main.AppLog>;
 
 export function GetLogSummaries():Promise<Array<main.AppLog>>;
 
-export function GetLogs():Promise<Array<main.AppLog>>;
-
 export function GetModels():Promise<Array<main.ModelInfo>>;
 
 export function GetRequestDetail(arg1:string):Promise<main.RequestRecord>;
 
 export function GetRequestSummaries():Promise<Array<main.RequestRecord>>;
-
-export function GetRequests():Promise<Array<main.RequestRecord>>;
 
 export function GetStatus():Promise<main.ProxyStatus>;
 
@@ -40,8 +38,6 @@ export function HideWindow():Promise<void>;
 export function MinimizeWindow():Promise<void>;
 
 export function OpenPathInFileManager(arg1:string):Promise<void>;
-
-export function QuitApp():Promise<void>;
 
 export function RefreshModels():Promise<Array<main.ModelInfo>>;
 
