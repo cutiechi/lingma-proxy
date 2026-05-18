@@ -36,6 +36,12 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
+      - name: Verify synced version files
+        run: ./scripts/check-version-sync.sh
+
+      - name: Verify release notes entry
+        run: ./scripts/check-release-notes.sh
+
       - name: Build desktop frontend
         run: |
           npm ci --prefix desktop/frontend

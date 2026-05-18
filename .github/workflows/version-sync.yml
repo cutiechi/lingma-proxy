@@ -21,3 +21,6 @@ jobs:
 
       - name: Verify synced version files
         run: ./scripts/check-version-sync.sh
+
+      - name: Verify release notes entry
+        run: ./scripts/check-release-notes.sh

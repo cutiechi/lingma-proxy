@@ -902,17 +902,29 @@ Release workflow 会执行：
 推荐的远端发布顺序：
 
 1. 更新根级 `VERSION`
-2. 执行 `./scripts/sync-version.sh`
-3. 执行 `./scripts/check-version-sync.sh`
-4. 确认 `README.md`、`README.zh-CN.md`、`CHANGELOG.md` 的 release 内容符合预期
-5. 确认本地桌面候选包验收通过
+2. 在 [CHANGELOG.md](./CHANGELOG.md) 中补上同版本的独立条目：`## vX.Y.Z - YYYY-MM-DD`
+3. 执行 `./scripts/release-check.sh`
+4. 检查脚本生成的 diff 并提交
+5. 把 release 提交推送到 `main`
 6. 根据 `VERSION` 创建并推送正式 release tag
    `VERSION=$(cat VERSION)`
-   `git tag "v$VERSION" && git push origin "v$VERSION"`
+   `git tag "v$VERSION" && git push origin main "v$VERSION"`
 7. 等待 GitHub Actions 产出 CLI + Desktop 资产
 8. 在 Releases 页面核对 DMG / ZIP / Windows 包和 SHA256 校验文件
 
-版本维护现在由脚本驱动，但 release 发布本身仍然是手动动作：由你决定何时修改 `VERSION`、何时推 tag、以及是否手动触发 GitHub `Release` workflow。
+`./scripts/release-check.sh` 会按固定顺序执行本地发版闸门：
+
+1. `./scripts/sync-version.sh`
+2. `./scripts/check-version-sync.sh`
+3. `./scripts/check-release-notes.sh`
+4. `npm run build --prefix desktop/frontend`
+5. `go test ./...`
+6. `go build -o lingma-ipc-proxy ./cmd/lingma-ipc-proxy`
+7. macOS 下自动执行 `./scripts/rebuild-local-app.sh`
+
+如果只想跑代码级闸门、不重建已安装桌面端，可以用 `./scripts/release-check.sh --skip-rebuild-local-app`。
+
+版本维护现在由脚本驱动，release 闸门也有脚本和 CI 强校验，但正式发布本身仍然是手动动作：由你决定何时修改 `VERSION`、何时推 release 提交、以及何时推 tag。
 
 如果只是临时补打一轮远端包、不想改 App 内部版本号，可以使用 `v1.4.15-fix1` 这种后缀 tag。GitHub Release workflow 仍然会因为匹配 `v*` 而打出最新代码对应的包。
 

@@ -796,17 +796,29 @@ The GitHub release workflow is triggered by:
 Recommended remote release checklist:
 
 1. update [VERSION](./VERSION)
-2. run `./scripts/sync-version.sh`
-3. run `./scripts/check-version-sync.sh`
-4. make sure `README.md`, `README.zh-CN.md`, and `CHANGELOG.md` contain the expected release notes content
-5. confirm the local desktop verification build has passed
+2. add a dedicated `## vX.Y.Z - YYYY-MM-DD` entry to [CHANGELOG.md](./CHANGELOG.md) for the same version
+3. run `./scripts/release-check.sh`
+4. review the generated diffs and commit them
+5. push the release commit to `main`
 6. create and push the release tag from `VERSION`
    `VERSION=$(cat VERSION)`
-   `git tag "v$VERSION" && git push origin "v$VERSION"`
+   `git tag "v$VERSION" && git push origin main "v$VERSION"`
 7. wait for GitHub Actions to build CLI + desktop assets
 8. verify the DMG / ZIP / Windows packages and SHA256 file in the Release page
 
-Version maintenance is script-driven, but release publication is still a manual action: you choose when to update `VERSION`, when to push the tag, and when to run the GitHub `Release` workflow manually.
+`./scripts/release-check.sh` runs the standard local release gate in order:
+
+1. `./scripts/sync-version.sh`
+2. `./scripts/check-version-sync.sh`
+3. `./scripts/check-release-notes.sh`
+4. `npm run build --prefix desktop/frontend`
+5. `go test ./...`
+6. `go build -o lingma-ipc-proxy ./cmd/lingma-ipc-proxy`
+7. `./scripts/rebuild-local-app.sh` on macOS
+
+Use `./scripts/release-check.sh --skip-rebuild-local-app` when you only want the code-level gate without rebuilding the installed desktop app.
+
+Version maintenance is script-driven, and the release gate is now script-checked, but release publication is still a manual action: you choose when to update `VERSION`, when to push the release commit, and when to push the tag.
 
 If you need a temporary packaging tag without changing the app's internal version line, use a suffix tag such as `v1.4.15-fix1`. The GitHub workflow will still package the latest code because the workflow matches `v*`.
 
