@@ -101,6 +101,37 @@ jobs:
           name: cli-windows
           path: lingma-proxy_${{ env.RELEASE_TAG }}_windows_amd64.zip
 
+  build-cli-linux:
+    name: Build CLI Linux
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build CLI amd64
+        run: |
+          mkdir -p dist-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist-amd64/lingma-proxy ./cmd/lingma-ipc-proxy
+          tar -C dist-amd64 -czf "lingma-proxy_${RELEASE_TAG}_linux_amd64.tar.gz" lingma-proxy
+
+      - name: Build CLI arm64
+        run: |
+          mkdir -p dist-arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dist-arm64/lingma-proxy ./cmd/lingma-ipc-proxy
+          tar -C dist-arm64 -czf "lingma-proxy_${RELEASE_TAG}_linux_arm64.tar.gz" lingma-proxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux
+          path: lingma-proxy_${{ env.RELEASE_TAG }}_linux_*.tar.gz
+
   build-desktop-macos:
     name: Build Desktop macOS
     runs-on: macos-latest
