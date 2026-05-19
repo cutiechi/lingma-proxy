@@ -237,6 +237,54 @@ jobs:
           name: desktop-windows
           path: lingma-proxy-desktop_${{ env.RELEASE_TAG }}_windows_amd64.zip
 
+  build-desktop-linux-amd64:
+    name: Build Desktop Linux amd64
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install Wails dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix desktop/frontend
+
+      - name: Build app
+        run: |
+          cd desktop
+          wails build -platform linux/amd64 -clean
+
+      - name: Package app
+        run: |
+          binary_path="desktop/build/bin/LingmaProxy"
+          test -f "$binary_path"
+          tar -C desktop/build/bin -czf "lingma-proxy-desktop_${RELEASE_TAG}_linux_amd64.tar.gz" LingmaProxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-amd64
+          path: lingma-proxy-desktop_${{ env.RELEASE_TAG }}_linux_amd64.tar.gz
+
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
