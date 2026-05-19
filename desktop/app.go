@@ -1646,6 +1646,8 @@ func titleOS(osName string) string {
 		return "macOS"
 	case "windows":
 		return "Windows"
+	case "linux":
+		return "Linux"
 	default:
 		return osName
 	}
