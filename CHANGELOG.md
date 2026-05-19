@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased (target: v1.5.4.1)
-
 ## v1.5.4.1 - 2026-05-19
 
 - Add Linux CLI and Desktop build support (amd64 + arm64)
 - Fix desktop app to show 'Linux' instead of 'linux' in UI
 - Add Linux icon support and GTK dependencies
 - Add Linux build jobs to GitHub Actions release workflow
+- Update documentation with Linux support information
+
+## Unreleased (target: v1.5.4.2)
 
 ## v1.5.4 - 2026-05-19
 
