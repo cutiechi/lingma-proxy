@@ -10,11 +10,15 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/appicon.png
+var appIcon []byte
 
 func main() {
 	app := NewApp()
@@ -47,6 +51,9 @@ func main() {
 			app,
 		},
 		Frameless: false,
+		Linux: &linux.Options{
+			Icon: appIcon,
+		},
 		Mac: &mac.Options{
 			TitleBar: &mac.TitleBar{
 				TitlebarAppearsTransparent: false,
@@ -59,6 +66,7 @@ func main() {
 			About: &mac.AboutInfo{
 				Title:   "Lingma Proxy",
 				Message: "A desktop GUI for Lingma Proxy",
+				Icon:    appIcon,
 			},
 		},
 	})
