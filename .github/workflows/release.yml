@@ -101,6 +101,37 @@ jobs:
           name: cli-windows
           path: lingma-proxy_${{ env.RELEASE_TAG }}_windows_amd64.zip
 
+  build-cli-linux:
+    name: Build CLI Linux
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build CLI amd64
+        run: |
+          mkdir -p dist-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist-amd64/lingma-proxy ./cmd/lingma-ipc-proxy
+          tar -C dist-amd64 -czf "lingma-proxy_${RELEASE_TAG}_linux_amd64.tar.gz" lingma-proxy
+
+      - name: Build CLI arm64
+        run: |
+          mkdir -p dist-arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dist-arm64/lingma-proxy ./cmd/lingma-ipc-proxy
+          tar -C dist-arm64 -czf "lingma-proxy_${RELEASE_TAG}_linux_arm64.tar.gz" lingma-proxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux
+          path: lingma-proxy_${{ env.RELEASE_TAG }}_linux_*.tar.gz
+
   build-desktop-macos:
     name: Build Desktop macOS
     runs-on: macos-latest
@@ -206,14 +237,113 @@ jobs:
           name: desktop-windows
           path: lingma-proxy-desktop_${{ env.RELEASE_TAG }}_windows_amd64.zip
 
+  build-desktop-linux-amd64:
+    name: Build Desktop Linux amd64
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install Wails dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix desktop/frontend
+
+      - name: Build app
+        run: |
+          cd desktop
+          wails build -platform linux/amd64 -tags webkit2_41 -clean
+
+      - name: Package app
+        run: |
+          binary_path="desktop/build/bin/LingmaProxy"
+          test -f "$binary_path"
+          tar -C desktop/build/bin -czf "lingma-proxy-desktop_${RELEASE_TAG}_linux_amd64.tar.gz" LingmaProxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-amd64
+          path: lingma-proxy-desktop_${{ env.RELEASE_TAG }}_linux_amd64.tar.gz
+
+  build-desktop-linux-arm64:
+    name: Build Desktop Linux arm64
+    runs-on: ubuntu-24.04-arm
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install Wails dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix desktop/frontend
+
+      - name: Build app
+        run: |
+          cd desktop
+          wails build -platform linux/arm64 -tags webkit2_41 -clean
+
+      - name: Package app
+        run: |
+          binary_path="desktop/build/bin/LingmaProxy"
+          test -f "$binary_path"
+          tar -C desktop/build/bin -czf "lingma-proxy-desktop_${RELEASE_TAG}_linux_arm64.tar.gz" LingmaProxy
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-arm64
+          path: lingma-proxy-desktop_${{ env.RELEASE_TAG }}_linux_arm64.tar.gz
+
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
     needs:
       - build-cli-macos
       - build-cli-windows
+      - build-cli-linux
       - build-desktop-macos
       - build-desktop-windows
+      - build-desktop-linux-amd64
+      - build-desktop-linux-arm64
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
