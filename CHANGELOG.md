@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (target: v1.5.4)
+## Unreleased (target: v1.5.4.1)
 
 ## v1.5.4 - 2026-05-19
 
