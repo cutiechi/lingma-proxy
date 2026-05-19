@@ -339,8 +339,11 @@ jobs:
     needs:
       - build-cli-macos
       - build-cli-windows
+      - build-cli-linux
       - build-desktop-macos
       - build-desktop-windows
+      - build-desktop-linux-amd64
+      - build-desktop-linux-arm64
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
