@@ -8,6 +8,8 @@
 - Add Linux build jobs to GitHub Actions release workflow
 - Update documentation with Linux support information
 
+## Unreleased (target: v1.5.4.1)
+
 ## v1.5.4 - 2026-05-19
 
 ## v1.5.4 - 2026-05-19
