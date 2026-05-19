@@ -271,7 +271,7 @@ jobs:
       - name: Build app
         run: |
           cd desktop
-          wails build -platform linux/amd64 -clean
+          wails build -platform linux/amd64 -tags webkit2_41 -clean
 
       - name: Package app
         run: |
@@ -319,7 +319,7 @@ jobs:
       - name: Build app
         run: |
           cd desktop
-          wails build -platform linux/arm64 -clean
+          wails build -platform linux/arm64 -tags webkit2_41 -clean
 
       - name: Package app
         run: |
